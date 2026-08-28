@@ -681,6 +681,10 @@ def _get_gpu_sensors_lhm() -> dict[str, dict[str, Any]]:
             g["power_draw_watts"] = round(v, 1)
         elif s["type"] == "Fan":
             g["fan_speed_percent"] = round(v, 0)
+        elif s["type"] == "Control":
+            # AMD often reports fan speed as a "Control" sensor (0-100%).
+            if "fan" in name_l:
+                g["fan_speed_percent"] = round(v, 0)
         elif s["type"] == "Clock":
             if "memory" in name_l:
                 g["memory_clock_mhz"] = round(v)
@@ -1148,6 +1152,7 @@ def light_snapshot() -> dict[str, Any]:
 
     gpu_temp = None
     gpu_fan_pct = None
+    gpu_power_w = None
     try:
         gpus = _get_gpu_sensors_lhm()
         temps = [g.get("temperature_celsius") for g in gpus.values()]
@@ -1158,6 +1163,10 @@ def light_snapshot() -> dict[str, Any]:
         fans = [f for f in fans if f is not None]
         if fans:
             gpu_fan_pct = max(fans)
+        pw = [g.get("power_draw_watts") for g in gpus.values()]
+        pw = [p for p in pw if p is not None]
+        if pw:
+            gpu_power_w = round(max(pw), 1)
     except Exception:
         pass
 
@@ -1179,6 +1188,8 @@ def light_snapshot() -> dict[str, Any]:
         "disk_temp_max": disk_temp_max,
         "cpu_fan_rpm": _get_cpu_fan_speed(),
         "gpu_fan_pct": gpu_fan_pct,
+        "cpu_power_w": _get_cpu_power(),
+        "gpu_power_w": gpu_power_w,
     }
 
 

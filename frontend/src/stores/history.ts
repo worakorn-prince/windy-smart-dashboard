@@ -11,6 +11,8 @@ export interface HistoryPoint {
   disk_temp_max: number | null
   cpu_fan_rpm: number | null
   gpu_fan_pct: number | null
+  cpu_power_w: number | null
+  gpu_power_w: number | null
   net_sent_bps: number | null
   net_recv_bps: number | null
   disk_read_bps: number | null

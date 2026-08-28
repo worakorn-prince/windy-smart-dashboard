@@ -26,13 +26,15 @@ CREATE TABLE IF NOT EXISTS samples(
     cpu_pct REAL, ram_pct REAL, swap_pct REAL,
     cpu_temp REAL, gpu_temp REAL, disk_temp_max REAL,
     cpu_fan_rpm REAL, gpu_fan_pct REAL,
+    cpu_power_w REAL, gpu_power_w REAL,
     net_sent_bps REAL, net_recv_bps REAL,
     disk_read_bps REAL, disk_write_bps REAL
 );
 """
 
 _COLS = ("cpu_pct", "ram_pct", "swap_pct", "cpu_temp", "gpu_temp", "disk_temp_max",
-         "cpu_fan_rpm", "gpu_fan_pct", "net_sent_bps", "net_recv_bps",
+         "cpu_fan_rpm", "gpu_fan_pct", "cpu_power_w", "gpu_power_w",
+         "net_sent_bps", "net_recv_bps",
          "disk_read_bps", "disk_write_bps")
 
 _RANGES: dict[str, int] = {"1h": 3600, "6h": 21600, "24h": 86400}
@@ -54,7 +56,17 @@ def _get_conn() -> sqlite3.Connection:
         _conn.execute("PRAGMA synchronous=NORMAL")
         _conn.executescript(_SCHEMA)
         _conn.commit()
+        _migrate(_conn)
     return _conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add columns that may be missing on databases created by older builds."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(samples)")}
+    for col in ("cpu_power_w", "gpu_power_w"):
+        if col not in existing:
+            conn.execute(f"ALTER TABLE samples ADD COLUMN {col} REAL")
+    conn.commit()
 
 
 def record_sample() -> dict[str, Any]:
@@ -84,10 +96,11 @@ def record_sample() -> dict[str, Any]:
     with _lock:
         conn = _get_conn()
         conn.execute(
-            "INSERT OR REPLACE INTO samples VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO samples VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (s["ts"], s["cpu_pct"], s["ram_pct"], s["swap_pct"],
              s["cpu_temp"], s["gpu_temp"], s["disk_temp_max"],
              s["cpu_fan_rpm"], s["gpu_fan_pct"],
+             s["cpu_power_w"], s["gpu_power_w"],
              s["net_sent_bps"], s["net_recv_bps"],
              s["disk_read_bps"], s["disk_write_bps"]),
         )

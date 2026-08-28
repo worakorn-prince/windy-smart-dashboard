@@ -22,6 +22,8 @@ const SERIES_DEFS: SeriesDef[] = [
   { key: 'gpu_temp', label: 'GPU °C', scale: '°C', stroke: '#ba68c8' },
   { key: 'disk_temp_max', label: 'Disk °C', scale: '°C', stroke: '#ffb74d' },
   { key: 'cpu_fan_rpm', label: 'CPU Fan RPM', scale: 'RPM', stroke: '#4db6ac' },
+  { key: 'cpu_power_w', label: 'CPU W', scale: 'W', stroke: '#fff176' },
+  { key: 'gpu_power_w', label: 'GPU W', scale: 'W', stroke: '#ff8a65' },
   { key: 'net_recv_bps', label: 'Net ↓ MB/s', scale: 'MB/s', stroke: '#64b5f6', div: 1048576 },
   { key: 'net_sent_bps', label: 'Net ↑ MB/s', scale: 'MB/s', stroke: '#9575cd', div: 1048576 },
   { key: 'disk_read_bps', label: 'Disk R MB/s', scale: 'MB/s', stroke: '#81c784', div: 1048576 },
@@ -29,7 +31,7 @@ const SERIES_DEFS: SeriesDef[] = [
 ]
 
 const RANGES: HistoryRange[] = ['1h', '6h', '24h']
-const enabled = ref<string[]>(['cpu_pct', 'ram_pct', 'cpu_temp', 'gpu_temp'])
+const enabled = ref<string[]>(['cpu_pct', 'ram_pct', 'cpu_temp', 'gpu_temp', 'cpu_power_w', 'gpu_power_w'])
 
 const chartEl = ref<HTMLElement | null>(null)
 let uplot: uPlot | null = null
@@ -68,6 +70,7 @@ function fmtVal(d: SeriesDef, v: number | null): string {
   if (v == null) return '-'
   if (d.div) return v.toFixed(2)
   if (d.scale === '%' || d.scale === '°C') return v.toFixed(1)
+  if (d.scale === 'W') return v.toFixed(1)
   return v.toFixed(0)
 }
 
