@@ -15,6 +15,30 @@ Built with FastAPI (Python 3.12) + Vue 3 / TypeScript / Vite.
 > computer, not from the network. This is intentional and a security
 > feature.
 
+## 🪟 Platform & Requirements
+
+**Windows 10 / 11 only.** This project is not portable to other operating
+systems and has not been tested (and is not expected to run) on Linux or
+macOS. It relies on Windows-specific pieces:
+
+- PowerShell launcher scripts (`run.ps1` / `run.bat`)
+- **LibreHardwareMonitorLib** (in-process COM) for CPU/GPU/disk temperatures
+  and fan speeds
+- **Windows Firewall** (block/unblock rules), **Windows Defender** status,
+  and the **Security event log** (failed logins)
+- **Native Windows Toast** notifications
+- `clr_loader` / `pythonnet` to load the `.NET` hardware library
+
+On Windows the backend (FastAPI + psutil) and frontend (Vue/Vite) are plain
+Python/Node and would run anywhere, but the platform integrations above are
+Windows-only, so the app as a whole only runs on Windows.
+
+### Prerequisites
+- Python 3.10+ on `PATH`
+- Node.js 18+ on `PATH`
+- (Optional, for sensors) LibreHardwareMonitor — `winget install -e --id LibreHardwareMonitor.LibreHardwareMonitor`
+- (For full security features) run as **Administrator**
+
 ---
 
 ## ✨ Features
