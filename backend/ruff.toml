@@ -1,0 +1,36 @@
+# Ruff configuration for the Dashboard backend.
+# Shared baseline: run `..\.venv\Scripts\ruff.exe check .`
+line-length = 120
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W", "UP", "B", "SIM", "RUF", "PL", "TRY", "DTZ", "FURB"]
+
+ignore = [
+  # Defensive broad excepts are intentional around Windows/WMI/psutil APIs.
+  "BLE001",
+  # Graceful degradation loops (try-except-pass/continue) are by design.
+  "S110", "S112",
+  # Local tool spawns local executables on purpose.
+  "S603", "S607",
+  # Local-time display is intended for dashboard values.
+  "DTZ005", "DTZ007",
+  # Lazy imports keep startup fast (reportlab/sensors_lhm/json load on demand).
+  "PLC0415",
+  # Module-level cache globals are the chosen state pattern.
+  "PLW0603",
+  # Domain constants (ports 3389/22, DDR speed tiers, risk weights) read fine inline.
+  "PLR2004",
+  # Long lines come from embedded PowerShell/wmic scripts.
+  "E501",
+  # return-inside-try is idiomatic here; else-blocks would add nesting.
+  "TRY300", "TRY003",
+  # `for line in x: line = line.strip()` idiom kept for clarity.
+  "PLW2901",
+  # Structural complexity limits — audit builders are intentionally large.
+  "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLR0917",
+]
+
+[lint.per-file-ignores]
+# Sensors interop layer keeps legacy typing aliases for pythonnet clarity.
+"sensors_lhm.py" = ["UP006", "UP045"]

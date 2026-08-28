@@ -1,0 +1,26 @@
+{
+  "name": "computer-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview --port 4173"
+  },
+  "dependencies": {
+    "chart.js": "^4.4.3",
+    "pinia": "^2.1.7",
+    "uplot": "^1.6.32",
+    "vue": "^3.4.27",
+    "vue-chartjs": "^5.3.1",
+    "vue-router": "^4.3.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.2",
+    "@vitejs/plugin-vue": "^5.0.4",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.13",
+    "vue-tsc": "^2.0.21"
+  }
+}
