@@ -203,7 +203,7 @@ queries bucketed averages (~360 points max) for the selected range.
 
 ---
 
-## 🚀 Quick start (one script)
+## 🚀 How to start (one script)
 
 ```powershell
 # from a normal shell — installs deps, builds frontend, starts server
