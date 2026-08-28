@@ -1,7 +1,5 @@
 # Windy Smart Dashboard
 
-> 🇹🇭 ไทย: [README.th.md](README.th.md)
-
 Real-time web dashboard for monitoring your own computer (CPU, RAM, disk,
 network, top processes, system info, internet speed test) plus a built-in
 **security audit module** that inspects your machine for weak-spots:

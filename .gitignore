@@ -26,3 +26,8 @@ frontend/dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Thai-only documentation (local reading copy, not published to GitHub)
+README.th.md
+design.md
+
