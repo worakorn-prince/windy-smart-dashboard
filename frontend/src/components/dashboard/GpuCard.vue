@@ -1,7 +1,18 @@
 <script setup lang="ts">
 import type { GpuSnapshot } from '@/stores/metrics'
+import { useMetricsStore } from '@/stores/metrics'
+import { computed } from 'vue'
 
-defineProps<{ gpu: GpuSnapshot | null }>()
+const props = defineProps<{ gpu: GpuSnapshot | null }>()
+const store = useMetricsStore()
+const sensorMsg = computed(() => store.sensorStatus?.message ?? '')
+const noLiveSensors = computed(() => {
+  const gpus = props.gpu?.gpus ?? []
+  if (!gpus.length) return false
+  return gpus.every(
+    (g) => g.temperature_celsius == null && g.fan_speed_percent == null,
+  )
+})
 
 const tempColor = (v?: number) => {
   if (v == null) return ''
@@ -89,6 +100,7 @@ const vendorIcon = (v: string) => {
       </div>
     </div>
     <p v-else class="muted">No dedicated GPU detected.</p>
+    <p v-if="noLiveSensors && sensorMsg" class="muted small">{{ sensorMsg }}</p>
   </div>
 </template>
 

@@ -983,6 +983,19 @@ def processes_snapshot(top_n: int = 10) -> list[dict[str, Any]]:
     return procs[:top_n]
 
 
+def sensors_status() -> dict[str, Any]:
+    """Return hardware-sensor availability state + a human-readable message."""
+    try:
+        import sensors_lhm
+
+        return {
+            "state": sensors_lhm.init_state(),
+            "message": sensors_lhm.status_message(),
+        }
+    except Exception:
+        return {"state": "no_pythonnet", "message": "sensors_lhm unavailable"}
+
+
 def system_snapshot() -> dict[str, Any]:
     boot_ts = psutil.boot_time()
     uptime_seconds = time.time() - boot_ts
@@ -1005,6 +1018,7 @@ def system_snapshot() -> dict[str, Any]:
         "uptime": f"{days}d {hours}h {minutes}m",
         "now": datetime.now().isoformat(),
         "battery": battery,
+        "sensors": sensors_status(),
     }
 
 

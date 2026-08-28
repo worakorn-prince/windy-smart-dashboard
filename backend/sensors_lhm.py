@@ -16,11 +16,77 @@ from typing import Any
 logger = logging.getLogger("dashboard.sensors_lhm")
 
 # winget portable install location; overridable via env var.
-LHM_DLL_DIR = os.environ.get(
-    "LHM_DLL_DIR",
-    r"C:\Users\Prince\AppData\Local\Microsoft\WinGet\Packages"
-    r"\LibreHardwareMonitor.LibreHardwareMonitor_Microsoft.Winget.Source_8wekyb3d8bbwe",
-)
+def _resolve_lhm_dir() -> str:
+    """Locate the directory containing LibreHardwareMonitorLib.dll.
+
+    Honours the LHM_DLL_DIR env override, then searches common install
+    locations (winget Packages, Program Files) for the DLL so the path no
+    longer has to be hard-coded to a specific winget package hash.
+    """
+    env = os.environ.get("LHM_DLL_DIR")
+    if env:
+        return env
+
+    local_app = os.path.join(
+        os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WinGet", "Packages"
+    )
+    bases = [local_app] if local_app else []
+    bases += [
+        r"C:\Program Files\LibreHardwareMonitor",
+        r"C:\Program Files (x86)\LibreHardwareMonitor",
+        os.path.expanduser("~\\LibreHardwareMonitor"),
+    ]
+    for base in bases:
+        if not base or not os.path.isdir(base):
+            continue
+        if os.path.exists(os.path.join(base, "LibreHardwareMonitorLib.dll")):
+            return base
+        # winget installs into a versioned subfolder — search one level deep.
+        try:
+        for name in os.listdir(base):
+            sub = os.path.join(base, name)
+            if (
+                os.path.isdir(sub)
+                and name.lower().startswith("librehardwaremonitor")
+                and os.path.exists(
+                    os.path.join(sub, "LibreHardwareMonitorLib.dll")
+                )
+            ):
+                return sub
+        except OSError:
+            pass
+
+    # Fallback to the historical winget default path.
+    return (
+        r"C:\Users\Prince\AppData\Local\Microsoft\WinGet\Packages"
+        r"\LibreHardwareMonitor.LibreHardwareMonitor_Microsoft.Winget.Source_8wekyb3d8bbwe"
+    )
+
+
+def status_message() -> str:
+    """Human-readable explanation of the current sensor init state."""
+    state = _init_state
+    if state == "ok":
+        return "Hardware sensors active."
+    if state == "requires_admin":
+        return (
+            "Hardware sensors disabled — restart the dashboard as "
+            "Administrator so LibreHardwareMonitor can read temperatures "
+            "and fans."
+        )
+    if state == "not_windows":
+        return "Hardware sensors are only supported on Windows."
+    if state.startswith("dll_not_found"):
+        return (
+            "LibreHardwareMonitor not found. Install it with "
+            "'winget install -e --id LibreHardwareMonitor.LibreHardwareMonitor' "
+            "and restart as Administrator."
+        )
+    if state.startswith("no_pythonnet"):
+        return "pythonnet/clr is not installed in this environment."
+    if state.startswith("failed:"):
+        return f"Hardware sensor init failed: {state.split(':', 1)[1]}"
+    return "Hardware sensors not initialised yet."
 
 _lock = threading.Lock()
 _computer: Any = None
@@ -85,7 +151,8 @@ def _init() -> None:
         logger.info("LHM: backend not elevated - hardware temps disabled")
         return
 
-    dll_path = os.path.join(LHM_DLL_DIR, "LibreHardwareMonitorLib.dll")
+    dll_dir = _resolve_lhm_dir()
+    dll_path = os.path.join(dll_dir, "LibreHardwareMonitorLib.dll")
     if not os.path.exists(dll_path):
         _init_state = f"dll_not_found:{dll_path}"
         logger.warning("LHM DLL missing: %s", dll_path)
@@ -94,9 +161,9 @@ def _init() -> None:
     try:
         import clr  # type: ignore  # pythonnet
 
-        sys.path.insert(0, LHM_DLL_DIR)
-        _preload_dlls(LHM_DLL_DIR)
-        _assembly_resolver(LHM_DLL_DIR)
+        sys.path.insert(0, dll_dir)
+        _preload_dlls(dll_dir)
+        _assembly_resolver(dll_dir)
         clr.AddReference("LibreHardwareMonitorLib")
 
         from LibreHardwareMonitor import Hardware  # type: ignore

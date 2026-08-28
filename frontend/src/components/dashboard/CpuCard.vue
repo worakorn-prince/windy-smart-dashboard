@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { CpuSnapshot } from '@/stores/metrics'
+import { useMetricsStore } from '@/stores/metrics'
 import { formatNumber } from '@/composables/format'
 
 const props = defineProps<{ cpu: CpuSnapshot | null; history: number[] }>()
+const store = useMetricsStore()
+const sensorMsg = computed(() => store.sensorStatus?.message ?? '')
 
 const color = (v: number) => (v > 85 ? 'var(--bad)' : v > 60 ? 'var(--warn)' : 'var(--accent)')
 const freqColor = (v: number | null) => (v && v > 3500 ? 'var(--warn)' : v && v < 1000 ? 'var(--info)' : 'var(--good)')
@@ -109,7 +112,7 @@ function tempClass(v: number) {
           <span class="label">Max: {{ cpu.temperature_celsius.max.toFixed(1) }}°C</span>
         </div>
       </div>
-      <div v-else class="muted small">Temperature unavailable — run dashboard as Administrator (uses LibreHardwareMonitor)</div>
+      <div v-else class="muted small">{{ sensorMsg || 'Temperature unavailable — run dashboard as Administrator (uses LibreHardwareMonitor)' }}</div>
 
       <!-- Power & Fan -->
       <div class="section" v-if="cpu.power_watts != null || cpu.fan_rpm != null">
@@ -125,7 +128,7 @@ function tempClass(v: number) {
           </div>
         </div>
       </div>
-      <div v-else class="muted small">Power/Fan data unavailable (requires LibreHardwareMonitor + admin)</div>
+      <div v-else class="muted small">{{ sensorMsg || 'Power/Fan data unavailable (requires LibreHardwareMonitor + admin)' }}</div>
 
     </div>
     <p v-else class="muted">Waiting for data…</p>

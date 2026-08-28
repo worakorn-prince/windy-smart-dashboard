@@ -180,6 +180,7 @@ export interface SystemInfo {
   uptime: string
   now: string
   battery?: BatteryInfo | null
+  sensors?: { state: string; message: string } | null
 }
 
 export interface ProcessInfo {
@@ -307,13 +308,14 @@ export const useMetricsStore = defineStore('metrics', () => {
 
   const cpuOverall = computed(() => cpu.value?.overall ?? 0)
   const ramPercent = computed(() => ram.value?.percent ?? 0)
+  const sensorStatus = computed(() => system.value?.sensors ?? null)
 
   return {
     cpu, ram, disk, network, system, gpu, processes, ping,
     cpuHistory, ramHistory, netSendHistory, netRecvHistory,
     speedtest, speedtestRunning,
     alerts,
-    cpuOverall, ramPercent,
+    cpuOverall, ramPercent, sensorStatus,
     connect, runSpeedtest, dismissAlert,
   }
 })
