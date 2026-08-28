@@ -120,6 +120,9 @@ def cpu_snapshot() -> dict[str, Any]:
     """, ttl=3600)
 
     cpu_temp = _get_cpu_temperature()
+    if cpu_temp is None:
+        # Fallback that does not require Administrator.
+        cpu_temp = _get_cpu_temperature_wmi()
     cpu_power = _get_cpu_power()
     cpu_fan = _get_cpu_fan_speed()
 
@@ -289,6 +292,40 @@ def _get_cpu_temperature() -> dict[str, Any] | None:
         "core_temps": readings[:16],
         "max": round(max(r["value"] for r in readings), 1),
         "average": round(sum(r["value"] for r in readings) / len(readings), 1),
+    }
+
+
+def _get_cpu_temperature_wmi() -> dict[str, Any] | None:
+    """Best-effort CPU temperature via WMI MSAcpi_ThermalZoneTemperature.
+
+    This works WITHOUT Administrator on many machines, so the CPU
+    temperature can still appear even if LibreHardwareMonitor is unavailable
+    (e.g. the user declined the UAC prompt). Values are deci-Kelvin.
+    """
+    script = r'''
+        $out = @()
+        try {
+            Get-CimInstance -Namespace root\WMI -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction Stop | ForEach-Object {
+                $out += [math]::Round(($_.CurrentTemperature - 2732) / 10, 1)
+            }
+        } catch { }
+        ConvertTo-Json -Compress -InputObject $out
+    '''
+    data = _get_wmi_cached("cpu_temp_wmi", script, ttl=10.0)
+    if not data:
+        return None
+    if isinstance(data, (int, float)):
+        data = [data]
+    if not isinstance(data, list):
+        return None
+    vals = [float(v) for v in data if isinstance(v, (int, float))]
+    if not vals:
+        return None
+    return {
+        "primary": round(max(vals), 1),
+        "core_temps": [{"name": "ThermalZone", "value": round(v, 1)} for v in vals],
+        "max": round(max(vals), 1),
+        "average": round(sum(vals) / len(vals), 1),
     }
 
 

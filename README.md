@@ -99,8 +99,8 @@ Setup:
 # one-time install
 winget install -e --id LibreHardwareMonitor.LibreHardwareMonitor
 
-# run the dashboard as Administrator so sensors can be read
-.\run.ps1   # from an elevated PowerShell window
+# just run it — run.ps1 auto-elevates (one UAC prompt) so sensors are read
+.\run.ps1
 ```
 
 Notes:
@@ -200,8 +200,8 @@ Optional flags:
 | `-Clean`    | Wipe `backend\.cache` and Python `__pycache__` (keeps deps) |
 
 For full security features (failed logins, firewall block rules,
-killing privileged processes), launch a new terminal **as
-Administrator** and run `.\run.ps1` from there.
+killing privileged processes) `run.ps1` automatically relaunches itself
+elevated (a single UAC prompt) — just run `.\run.ps1` normally.
 
 ### Manual setup (alternative)
 

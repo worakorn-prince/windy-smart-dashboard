@@ -43,16 +43,16 @@ def _resolve_lhm_dir() -> str:
             return base
         # winget installs into a versioned subfolder — search one level deep.
         try:
-        for name in os.listdir(base):
-            sub = os.path.join(base, name)
-            if (
-                os.path.isdir(sub)
-                and name.lower().startswith("librehardwaremonitor")
-                and os.path.exists(
-                    os.path.join(sub, "LibreHardwareMonitorLib.dll")
-                )
-            ):
-                return sub
+            for name in os.listdir(base):
+                sub = os.path.join(base, name)
+                if (
+                    os.path.isdir(sub)
+                    and name.lower().startswith("librehardwaremonitor")
+                    and os.path.exists(
+                        os.path.join(sub, "LibreHardwareMonitorLib.dll")
+                    )
+                ):
+                    return sub
         except OSError:
             pass
 

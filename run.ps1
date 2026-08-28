@@ -15,6 +15,21 @@ param(
   [Alias("c")][switch]$Clean
 )
 
+# --- Auto-elevate ------------------------------------------------------------
+# Hardware temperatures & fan speeds are read via LibreHardwareMonitor, which
+# requires Administrator privileges. Relaunch elevated (one UAC prompt) so the
+# dashboard "just works" without the user having to open an admin shell.
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+  Write-Host "[run] Hardware sensors (CPU/GPU temps, fan RPM) need Administrator - relaunching elevated..." -ForegroundColor Yellow
+  $relaunch = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $MyInvocation.MyCommand.Definition)
+  if ($Dev)    { $relaunch += "-Dev" }
+  if ($Install){ $relaunch += "-Install" }
+  if ($Clean)  { $relaunch += "-Clean" }
+  Start-Process powershell -ArgumentList $relaunch -Verb RunAs
+  exit
+}
+
 $ErrorActionPreference = "Stop"
 $root   = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $be     = Join-Path $root "backend"
