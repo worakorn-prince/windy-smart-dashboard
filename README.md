@@ -1,5 +1,11 @@
 # Windy Smart Dashboard
 
+![License](https://img.shields.io/github/license/worakorn-prince/windy-smart-dashboard)
+![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6)
+![Python](https://img.shields.io/badge/python-3.12-3776AB)
+![Latest Release](https://img.shields.io/github/v/release/worakorn-prince/windy-smart-dashboard)
+![Last Commit](https://img.shields.io/github/last-commit/worakorn-prince/windy-smart-dashboard)
+
 Real-time web dashboard for monitoring your own computer (CPU, RAM, disk,
 network, top processes, system info, internet speed test) plus a built-in
 **security audit module** that inspects your machine for weak-spots:
