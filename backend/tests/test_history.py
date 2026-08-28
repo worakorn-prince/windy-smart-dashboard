@@ -65,7 +65,7 @@ def test_null_values_survive_roundtrip(tmp_db):
     r = history.query_range("1h")
     assert r["count"] >= 1
     assert r["points"][-1]["cpu_temp"] is None
-    assert r["points"][-1]["cpu_fan_rpm"] is None
+    assert r["points"][-1]["cpu_power_w"] is None
 
 
 def test_old_rows_excluded_by_range(tmp_db):

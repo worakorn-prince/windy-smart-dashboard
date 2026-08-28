@@ -4,6 +4,7 @@ import { useMetricsStore } from '@/stores/metrics'
 import CpuCard from '@/components/dashboard/CpuCard.vue'
 import RamCard from '@/components/dashboard/RamCard.vue'
 import GpuCard from '@/components/dashboard/GpuCard.vue'
+import PowerCard from '@/components/dashboard/PowerCard.vue'
 import DiskCard from '@/components/dashboard/DiskCard.vue'
 import HistoryCard from '@/components/dashboard/HistoryCard.vue'
 import NetworkCard from '@/components/dashboard/NetworkCard.vue'
@@ -25,6 +26,7 @@ onMounted(() => {
       <CpuCard :cpu="store.cpu" :history="store.cpuHistory" />
       <RamCard :ram="store.ram" :history="store.ramHistory" />
       <GpuCard :gpu="store.gpu" />
+      <PowerCard />
       <DiskCard :disk="store.disk" />
       <NetworkCard :network="store.network" :ping="store.ping" />
       <SystemCard :system="store.system" />

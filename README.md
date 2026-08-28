@@ -23,7 +23,7 @@ macOS. It relies on Windows-specific pieces:
 
 - PowerShell launcher scripts (`run.ps1` / `run.bat`)
 - **LibreHardwareMonitorLib** (in-process COM) for CPU/GPU/disk temperatures
-  and fan speeds
+  and power draw
 - **Windows Firewall** (block/unblock rules), **Windows Defender** status,
   and the **Security event log** (failed logins)
 - **Native Windows Toast** notifications
@@ -56,8 +56,10 @@ Windows-only, so the app as a whole only runs on Windows.
 - Live ping latency to a configurable target
 - **Metrics history** — every metric is sampled to a local SQLite DB
   every 10 s and charted over the last **1 h / 6 h / 24 h**, including
-  CPU/GPU/disk temperatures and fan speeds (CPU RPM / GPU %), with
+  CPU/GPU/disk temperatures and power draw (CPU W / GPU W), with
   per-series toggles and multiple y-axes
+- **Live power usage** — a dedicated card shows current total wattage
+  (CPU + GPU) plus a per-component and per-GPU breakdown
 
 ### Security
 - **On-demand audit** — produces a risk-scored report with findings
@@ -87,7 +89,7 @@ Windows-only, so the app as a whole only runs on Windows.
 
 ---
 
-## 🌡️ Hardware temperatures (CPU/GPU/disk/power/fan)
+## 🌡️ Hardware temperatures & power (CPU/GPU/disk/power)
 
 Windows does not expose raw hardware sensors to normal programs. This
 dashboard reads them through **LibreHardwareMonitorLib** loaded directly
@@ -123,7 +125,7 @@ Dashboard/
 │   ├── metrics.py           psutil-based system metrics
 │   ├── history.py           SQLite metrics history (sampler + queries)
 │   ├── alerts.py            Threshold alerts + Windows Toast sender
-│   ├── sensors_lhm.py       LibreHardwareMonitorLib interop (temps/fans)
+│   ├── sensors_lhm.py       LibreHardwareMonitorLib interop (temps/power)
 │   ├── speedtest_worker.py  On-demand Internet speed test
 │   ├── tests/               pytest suite (alerts, history, parsers)
 │   ├── requirements.txt
@@ -171,13 +173,11 @@ queries bucketed averages (~360 points max) for the selected range.
 
 - Ranges: `1h` (10 s buckets), `6h` (60 s), `24h` (240 s)
 - Series: CPU/RAM/swap %, CPU/GPU/disk-max temperatures,
-  CPU fan RPM, GPU fan %, network & disk throughput (MB/s)
+  CPU W / GPU W power draw, network & disk throughput (MB/s)
 - Rows older than `HISTORY_RETENTION_HOURS` are deleted automatically
   (≈ <1 MB/day of disk usage)
-- Temperatures/fans are `NULL` when not running elevated — the chart
+- Temperatures/power are `NULL` when not running elevated — the chart
   shows gaps and a hint instead
-- On many AMD laptops the fan physically stops at idle (zero-RPM
-  cooling); fan series stay empty until load spins it up
 
 ---
 

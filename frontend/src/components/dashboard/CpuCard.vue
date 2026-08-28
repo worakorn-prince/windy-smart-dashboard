@@ -114,21 +114,17 @@ function tempClass(v: number) {
       </div>
       <div v-else class="muted small">{{ sensorMsg || 'Temperature unavailable — run dashboard as Administrator (uses LibreHardwareMonitor)' }}</div>
 
-      <!-- Power & Fan -->
-      <div class="section" v-if="cpu.power_watts != null || cpu.fan_rpm != null">
-        <h4>Power &amp; Cooling</h4>
+      <!-- Power -->
+      <div class="section" v-if="cpu.power_watts != null">
+        <h4>Power</h4>
         <div class="info-grid">
           <div class="info-row" v-if="cpu.power_watts != null">
             <span class="label">Power Draw</span>
             <span class="value">{{ cpu.power_watts.toFixed(1) }} W</span>
           </div>
-          <div class="info-row" v-if="cpu.fan_rpm != null">
-            <span class="label">Fan Speed</span>
-            <span class="value">{{ cpu.fan_rpm }} RPM</span>
-          </div>
         </div>
       </div>
-      <div v-else class="muted small">{{ sensorMsg || 'Power/Fan data unavailable (requires LibreHardwareMonitor + admin)' }}</div>
+      <div v-else class="muted small">{{ sensorMsg || 'Power data unavailable (requires LibreHardwareMonitor + admin)' }}</div>
 
     </div>
     <p v-else class="muted">Waiting for data…</p>

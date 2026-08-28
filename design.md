@@ -1,8 +1,8 @@
-# Design: Historical Metrics & Graphs (Temps + Fans)
+# Design: Historical Metrics & Graphs (Temps + Power)
 
 ## Goals
 เก็บ metrics ย้อนหลังฝั่ง server (SQLite WAL) ทุก 10s นาน 24 ชม. + กราฟ uPlot
-ช่วง 1H/6H/24H รวม **อุณหภูมิ (CPU/GPU/Disk-max) และความเร็วพัดลม (CPU RPM / GPU %)**
+ช่วง 1H/6H/24H รวม **อุณหภูมิ (CPU/GPU/Disk-max) และการใช้พลังงาน (CPU W / GPU W)**
 
 ## Architecture
 [history task] --10s--> metrics.light_snapshot() --> SQLite(WAL) --retention 24h-->
@@ -21,7 +21,7 @@ HISTORY_MAX_POINTS = 360
     ts REAL PRIMARY KEY,
     cpu_pct REAL, ram_pct REAL, swap_pct REAL,
     cpu_temp REAL, gpu_temp REAL, disk_temp_max REAL,
-    cpu_fan_rpm REAL, gpu_fan_pct REAL,
+    cpu_power_w REAL, gpu_power_w REAL,
     net_sent_bps REAL, net_recv_bps REAL,
     disk_read_bps REAL, disk_write_bps REAL);
   NULLs allowed (sensor missing / not elevated).
@@ -29,14 +29,14 @@ HISTORY_MAX_POINTS = 360
 - record_sample(): own prev counters for net/disk rates (psutil.net_io_counters /
   disk_io_counters) — MUST NOT call metrics.disk_snapshot()/network_snapshot()
   (would corrupt _last_disk_ts/_last_net_ts rate fix).
-- Temps/fans: reuse metrics._get_hw_sensors() (5s cache), _get_cpu_temperature(),
-  _get_gpu_sensors_lhm(), _get_cpu_fan_speed(); disk_temp_max = max(_get_disk_temperatures().values())
+- Temps/power: reuse metrics._get_hw_sensors() (5s cache), _get_cpu_temperature(),
+  _get_gpu_sensors_lhm(); disk_temp_max = max(_get_disk_temperatures().values())
 - query_range(range): bucket = range_sec/360 → SQL GROUP BY CAST(ts/bucket AS INT), AVG()
 - cleanup: DELETE ts < now-retention hourly.
 
 ### metrics.py (+~35 lines)
 light_snapshot() -> {cpu_pct, ram_pct, swap_pct, cpu_temp, gpu_temp, disk_temp_max,
-cpu_fan_rpm, gpu_fan_pct} — cheap psutil + cached sensors only.
+cpu_power_w, gpu_power_w} — cheap psutil + cached sensors only.
 
 ### main.py (+~25 lines)
 - lifespan: history_task = create_task(_history_loop()); add to cancel tuple.
@@ -48,7 +48,7 @@ cpu_fan_rpm, gpu_fan_pct} — cheap psutil + cached sensors only.
 - stores/history.ts (NEW): {range:'1h', points:[], loading} + fetch()
 - components/dashboard/HistoryCard.vue (NEW ~160 lines):
   * Range buttons 1H|6H|24H; series toggle chips grouped by unit
-  * uPlot multi-scale: "%" (cpu_pct,ram_pct,gpu_fan_pct), "°C" (temps), "RPM" (cpu_fan_rpm), "MB/s" (net/disk)
+  * uPlot multi-scale: "%" (cpu_pct,ram_pct), "W" (cpu_power_w,gpu_power_w), "°C" (temps), "MB/s" (net/disk)
   * NULL → gap; auto-refresh 60s; pause on document.hidden; dark theme via CSS vars
 - pages/Dashboard.vue: <HistoryCard /> first item in .grid.wide
 
@@ -61,12 +61,12 @@ Phase C (polish, ~30 min): C1 gap handling → C2 refresh/visibility → C3 READ
 ## Risks & Mitigations
 1. SQLite contention → WAL + single writer + to_thread
 2. Rate interference → sampler keeps OWN counters (do NOT touch metrics globals)
-3. Not elevated → temp/fan NULL → chart gaps + hint text
-4. Unit confusion GPU fan (%) vs CPU fan (RPM) → separate scales + labeled chips
+3. Not elevated → temp/power NULL → chart gaps + hint text
+4. Unit confusion CPU W vs GPU W → shared "W" scale + labeled chips
 5. DB growth ~<1MB/day → retention caps ~24MB
 
 ## Acceptance Criteria
 - /api/history?range=1h returns ≥50 points after 10 min uptime
 - Charts render all 3 ranges; data survives reload
-- Temps & fans series visible when elevated; graceful gaps when not
+- Temps & power series visible when elevated; graceful gaps when not
 - WS 1Hz latency unchanged; ruff check still passes; npm build OK

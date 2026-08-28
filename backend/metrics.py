@@ -124,7 +124,6 @@ def cpu_snapshot() -> dict[str, Any]:
         # Fallback that does not require Administrator.
         cpu_temp = _get_cpu_temperature_wmi()
     cpu_power = _get_cpu_power()
-    cpu_fan = _get_cpu_fan_speed()
 
     return {
         "overall": round(overall, 1),
@@ -138,7 +137,6 @@ def cpu_snapshot() -> dict[str, Any]:
         "info": cpu_info,
         "temperature_celsius": cpu_temp,
         "power_watts": cpu_power,
-        "fan_rpm": cpu_fan,
     }
 
 
@@ -332,12 +330,6 @@ def _get_cpu_temperature_wmi() -> dict[str, Any] | None:
 def _get_cpu_power() -> float | None:
     """CPU package power draw in watts."""
     return _sensor_value("Power", "cpu", "package", "tdie", exclude=("gpu",))
-
-
-def _get_cpu_fan_speed() -> int | None:
-    """Chassis/CPU fan RPM (first non-GPU fan)."""
-    v = _sensor_value("Fan", "fan", exclude=("gpu",))
-    return int(v) if v is not None else None
 
 
 # =============================================================================
@@ -655,7 +647,7 @@ def _get_gpu_sensors_lhm() -> dict[str, dict[str, Any]]:
     """GPU live metrics from LHM keyed by lowercase GPU hardware name.
 
     Handles identifier variants: /gpu/0 (NVIDIA), /gpu-amd/N, /gpu-intel/0.
-    Gives temperature/power/fan/clock/utilization for AMD & Intel GPUs that
+    Gives temperature/power/clock/utilization for AMD & Intel GPUs that
     nvidia-smi cannot see.
     """
     groups: dict[str, dict[str, Any]] = {}
@@ -679,12 +671,6 @@ def _get_gpu_sensors_lhm() -> dict[str, dict[str, Any]]:
                 g["temperature_celsius"] = round(v, 1)
         elif s["type"] == "Power":
             g["power_draw_watts"] = round(v, 1)
-        elif s["type"] == "Fan":
-            g["fan_speed_percent"] = round(v, 0)
-        elif s["type"] == "Control":
-            # AMD often reports fan speed as a "Control" sensor (0-100%).
-            if "fan" in name_l:
-                g["fan_speed_percent"] = round(v, 0)
         elif s["type"] == "Clock":
             if "memory" in name_l:
                 g["memory_clock_mhz"] = round(v)
@@ -898,7 +884,7 @@ def gpu_snapshot() -> dict[str, Any]:
             if not live:
                 continue
             for key in ("temperature_celsius", "hotspot_temp", "power_draw_watts",
-                        "fan_speed_percent", "graphics_clock_mhz",
+                        "graphics_clock_mhz",
                         "memory_clock_mhz", "gpu_usage_percent"):
                 val = live.get(key)
                 if val is not None and not g.get(key):
@@ -923,7 +909,7 @@ def _get_nvidia_gpus() -> list[dict[str, Any]]:
     try:
         result = subprocess.run([
             "nvidia-smi",
-            "--query-gpu=index,name,driver_version,memory.total,memory.used,memory.free,utilization.gpu,utilization.memory,temperature.gpu,power.draw,clocks.gr,clocks.mem,fan.speed",
+            "--query-gpu=index,name,driver_version,memory.total,memory.used,memory.free,utilization.gpu,utilization.memory,temperature.gpu,power.draw,clocks.gr,clocks.mem",
             "--format=csv,noheader,nounits"
         ], capture_output=True, timeout=10, text=True, check=False)
 
@@ -950,7 +936,6 @@ def _get_nvidia_gpus() -> list[dict[str, Any]]:
                     "power_draw_watts": float(parts[9]) if parts[9] != '[Not Supported]' else None,
                     "graphics_clock_mhz": int(parts[10]) if parts[10] != '[Not Supported]' else None,
                     "memory_clock_mhz": int(parts[11]) if parts[11] != '[Not Supported]' else None,
-                    "fan_speed_percent": float(parts[12]) if len(parts) > 12 and parts[12] != '[Not Supported]' else None,
                 })
         return gpus
     except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
@@ -1151,7 +1136,6 @@ def light_snapshot() -> dict[str, Any]:
         cpu_temp = ct.get("primary")
 
     gpu_temp = None
-    gpu_fan_pct = None
     gpu_power_w = None
     try:
         gpus = _get_gpu_sensors_lhm()
@@ -1159,10 +1143,6 @@ def light_snapshot() -> dict[str, Any]:
         temps = [t for t in temps if t is not None]
         if temps:
             gpu_temp = round(max(temps), 1)
-        fans = [g.get("fan_speed_percent") for g in gpus.values()]
-        fans = [f for f in fans if f is not None]
-        if fans:
-            gpu_fan_pct = max(fans)
         pw = [g.get("power_draw_watts") for g in gpus.values()]
         pw = [p for p in pw if p is not None]
         if pw:
@@ -1186,8 +1166,6 @@ def light_snapshot() -> dict[str, Any]:
         "cpu_temp": cpu_temp,
         "gpu_temp": gpu_temp,
         "disk_temp_max": disk_temp_max,
-        "cpu_fan_rpm": _get_cpu_fan_speed(),
-        "gpu_fan_pct": gpu_fan_pct,
         "cpu_power_w": _get_cpu_power(),
         "gpu_power_w": gpu_power_w,
     }

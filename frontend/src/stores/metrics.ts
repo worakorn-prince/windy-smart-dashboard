@@ -33,7 +33,6 @@ export interface CpuSnapshot {
   info?: CpuInfo | null
   temperature_celsius?: CpuTemperature | null
   power_watts?: number | null
-  fan_rpm?: number | null
 }
 
 export interface RamModule {
@@ -146,7 +145,6 @@ export interface GpuInfo {
   power_draw_watts?: number | null
   graphics_clock_mhz?: number | null
   memory_clock_mhz?: number | null
-  fan_speed_percent?: number | null
   video_processor?: string
   resolution?: string
   refresh_rate?: number

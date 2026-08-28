@@ -72,7 +72,7 @@ def status_message() -> str:
         return (
             "Hardware sensors disabled — restart the dashboard as "
             "Administrator so LibreHardwareMonitor can read temperatures "
-            "and fans."
+            "and power."
         )
     if state == "not_windows":
         return "Hardware sensors are only supported on Windows."

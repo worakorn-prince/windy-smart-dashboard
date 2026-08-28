@@ -17,11 +17,9 @@ interface SeriesDef {
 const SERIES_DEFS: SeriesDef[] = [
   { key: 'cpu_pct', label: 'CPU %', scale: '%', stroke: '#4fc3f7' },
   { key: 'ram_pct', label: 'RAM %', scale: '%', stroke: '#aed581' },
-  { key: 'gpu_fan_pct', label: 'GPU Fan %', scale: '%', stroke: '#f06292' },
   { key: 'cpu_temp', label: 'CPU °C', scale: '°C', stroke: '#ff8a65' },
   { key: 'gpu_temp', label: 'GPU °C', scale: '°C', stroke: '#ba68c8' },
   { key: 'disk_temp_max', label: 'Disk °C', scale: '°C', stroke: '#ffb74d' },
-  { key: 'cpu_fan_rpm', label: 'CPU Fan RPM', scale: 'RPM', stroke: '#4db6ac' },
   { key: 'cpu_power_w', label: 'CPU W', scale: 'W', stroke: '#fff176' },
   { key: 'gpu_power_w', label: 'GPU W', scale: 'W', stroke: '#ff8a65' },
   { key: 'net_recv_bps', label: 'Net ↓ MB/s', scale: 'MB/s', stroke: '#64b5f6', div: 1048576 },
@@ -40,8 +38,7 @@ let refreshTimer: number | null = null
 
 const hasTempData = computed(() =>
   store.points.some(p =>
-    p.cpu_temp != null || p.gpu_temp != null || p.disk_temp_max != null ||
-    p.cpu_fan_rpm != null || p.gpu_fan_pct != null))
+    p.cpu_temp != null || p.gpu_temp != null || p.disk_temp_max != null))
 
 function toggle(key: string) {
   const i = enabled.value.indexOf(key)
@@ -183,7 +180,7 @@ onBeforeUnmount(() => {
       No samples yet — collecting every 10s.
     </p>
     <p v-else-if="!hasTempData" class="hint">
-      Temperatures &amp; fans need admin elevation — run via elevated PowerShell.
+      Temperatures need admin elevation — run via elevated PowerShell.
     </p>
 
     <div ref="chartEl" class="chart"></div>

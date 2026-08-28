@@ -9,9 +9,7 @@ const sensorMsg = computed(() => store.sensorStatus?.message ?? '')
 const noLiveSensors = computed(() => {
   const gpus = props.gpu?.gpus ?? []
   if (!gpus.length) return false
-  return gpus.every(
-    (g) => g.temperature_celsius == null && g.fan_speed_percent == null,
-  )
+  return gpus.every((g) => g.temperature_celsius == null && g.power_draw_watts == null)
 })
 
 const tempColor = (v?: number) => {
@@ -87,10 +85,6 @@ const vendorIcon = (v: string) => {
           <div class="info-row" v-if="g.memory_clock_mhz != null">
             <span class="label">Mem Clock</span>
             <span class="value">{{ g.memory_clock_mhz }} MHz</span>
-          </div>
-          <div class="info-row" v-if="g.fan_speed_percent != null">
-            <span class="label">Fan</span>
-            <span class="value">{{ g.fan_speed_percent }}%</span>
           </div>
           <div class="info-row" v-if="g.resolution">
             <span class="label">Resolution</span>
