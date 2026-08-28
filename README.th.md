@@ -40,6 +40,30 @@ Python/Node ธรรมดา ซึ่งสามารถรันได้�
 
 ---
 
+## 🚀 เริ่มต้นอย่างรวดเร็ว (Quick Start)
+
+```bash
+git clone https://github.com/worakorn-prince/windy-smart-dashboard.git
+cd windy-smart-dashboard
+```
+
+```powershell
+# ครั้งแรก: ติดตั้ง dependencies (backend venv + frontend node_modules)
+.\run.ps1 -Install
+
+# รัน — เปิดที่ http://127.0.0.1:8000
+# (จะยกสิทธิ์เป็น Administrator อัตโนมัติผ่าน UAC ครั้งเดียว เพื่ออ่านเซนเซอร์ฮาร์ดแวร์)
+.\run.ps1
+```
+
+เปิด **http://127.0.0.1:8000** ในเบราว์เซอร์ของคุณ
+
+> 💡 ธง launcher อื่น ๆ: `.\run.ps1 -Dev` (backend :8000 + Vite dev :5173),
+> `.\run.ps1 -Clean` (ล้างแคช) โปรเจกต์นี้ **ไม่สามารถ** รันบน Linux/macOS ได้
+> เพราะเป็น Windows เท่านั้น (ดูด้านบน)
+
+---
+
 ## ✨ ฟีเจอร์
 
 ### แดชบอร์ด

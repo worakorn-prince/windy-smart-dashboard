@@ -41,6 +41,30 @@ Windows-only, so the app as a whole only runs on Windows.
 
 ---
 
+## 🚀 Quick Start
+
+```bash
+git clone https://github.com/worakorn-prince/windy-smart-dashboard.git
+cd windy-smart-dashboard
+```
+
+```powershell
+# one-time: install backend (venv) + frontend (node_modules) dependencies
+.\run.ps1 -Install
+
+# run it — opens at http://127.0.0.1:8000
+# (auto-elevates via one UAC prompt so hardware sensors can be read)
+.\run.ps1
+```
+
+Open **http://127.0.0.1:8000** in your browser.
+
+> 💡 Other launcher flags: `.\run.ps1 -Dev` (backend :8000 + Vite dev :5173),
+> `.\run.ps1 -Clean` (wipe caches). On Linux/macOS this project will **not** run —
+> it is Windows-only (see above).
+
+---
+
 ## ✨ Features
 
 ### Dashboard
