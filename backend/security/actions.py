@@ -50,11 +50,13 @@ async def kill_process(pid: int, force: bool = False) -> dict[str, Any]:
 
 
 def _make_rule_name(ip: str) -> str:
+    """Build a unique firewall rule name for an IP."""
     digest = hashlib.sha256(f"{ip}_{time.time_ns()}".encode()).hexdigest()[:16]
     return f"{RULE_PREFIX}{digest}"
 
 
 def _validate_rule_name(rule_name: str) -> bool:
+    """Return True when a rule name belongs to this dashboard."""
     if not isinstance(rule_name, str):
         return False
     if not _RULE_NAME_RE.match(rule_name):
@@ -73,9 +75,9 @@ async def block_ip(ip: str) -> dict[str, Any]:
     )
     try:
         res = await _run_shell(script)
-    except Exception as exc:
-        logger.warning("block_ip failed: %s", exc)
-        return {"ok": False, "reason": str(exc)}
+    except Exception:
+        logger.exception("block_ip failed")
+        return {"ok": False, "reason": "block_failed"}
     if "OK" in res or "ok" in res.lower():
         return {"ok": True, "ip": ip, "rule_name": rule_name}
     if "requires elevation" in res.lower() or "access" in res.lower():
@@ -84,13 +86,15 @@ async def block_ip(ip: str) -> dict[str, Any]:
 
 
 async def unblock_ip(rule_name: str) -> dict[str, Any]:
+    """Remove a firewall block rule by name, returning the result."""
     if not _validate_rule_name(rule_name):
         return {"ok": False, "reason": "invalid_rule_name"}
     script = f"netsh advfirewall firewall delete rule name=\"{rule_name}\""
     try:
         res = await _run_shell(script)
-    except Exception as exc:
-        return {"ok": False, "reason": str(exc)}
+    except Exception:
+        logger.exception("unblock_ip failed")
+        return {"ok": False, "reason": "unblock_failed"}
     if "deleted" in res.lower() or "no rule" in res.lower():
         return {"ok": True, "rule_name": rule_name}
     if "elevation" in res.lower() or "access" in res.lower():
@@ -99,14 +103,14 @@ async def unblock_ip(rule_name: str) -> dict[str, Any]:
 
 
 async def list_block_rules() -> dict[str, Any]:
-    """List all block rules created by this dashboard."""
+    """List firewall block rules created by this dashboard."""
     # netsh outputs "Rule Name:" records separated by blank lines.
     script = "netsh advfirewall firewall show rule name=all dir=out"
     try:
         res = await _run_shell_with_timeout(script, timeout=15.0)
-    except Exception as exc:
-        logger.warning("list_block_rules failed: %s", exc)
-        return {"ok": False, "reason": str(exc), "rules": []}
+    except Exception:
+        logger.exception("list_block_rules failed")
+        return {"ok": False, "reason": "list_failed", "rules": []}
 
     rules: list[dict[str, Any]] = []
     # Split records on blank line.
@@ -127,6 +131,7 @@ async def list_block_rules() -> dict[str, Any]:
 
 
 def _validate_ip(ip: str) -> bool:
+    """Return True when a string is a valid IP address."""
     try:
         ipaddress.ip_address(ip)
         return True
@@ -135,6 +140,7 @@ def _validate_ip(ip: str) -> bool:
 
 
 async def _run_shell(cmd: str) -> str:
+    """Run a shell command with the default timeout."""
     return await _run_shell_with_timeout(cmd, timeout=15.0)
 
 

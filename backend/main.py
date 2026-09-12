@@ -27,7 +27,7 @@ import re
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
@@ -108,7 +108,7 @@ async def lifespan(app: FastAPI):
 
         sensors_lhm.log_startup_status()
     except Exception:
-        logger.debug("sensor startup log skipped", exc_info=True)
+        logger.exception("sensor startup log skipped")
 
     async def _sec_emit(evt) -> None:
         await manager.broadcast("security", {"type": "security_event", **evt.to_dict()})
@@ -279,7 +279,7 @@ async def api_sensors_status() -> dict[str, Any]:
             "message": st.get("message"),
         }
     except Exception:
-        logger.debug("sensors status failed", exc_info=True)
+        logger.exception("sensors status failed")
         return {
             "lhm_available": False,
             "elevated": False,
@@ -290,8 +290,8 @@ async def api_sensors_status() -> dict[str, Any]:
 
 
 @app.get("/api/history")
-async def api_history(rng: str = Query(default="1h", alias="range")) -> dict[str, Any]:
-    """Bucketed metrics history. range: 1h | 6h | 24h."""
+async def api_history(rng: Literal["1h", "6h", "24h"] = Query(default="1h", alias="range")) -> dict[str, Any]:
+    """Return bucketed metrics history, rejecting unknown ranges with 422."""
     return await asyncio.to_thread(history.query_range, rng)
 
 

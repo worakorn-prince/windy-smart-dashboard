@@ -206,6 +206,9 @@ queries bucketed averages (~360 points max) for the selected range.
   (≈ <1 MB/day of disk usage)
 - Temperatures/power are `NULL` when not running elevated — the chart
   shows gaps and a hint instead
+- By default 6 of 11 series are shown (CPU/RAM %, CPU/GPU °C, CPU/GPU W);
+  use the range buttons (`1H` / `6H` / `24H`) to switch windows and the
+  series chips to toggle lines (choice persists in `localStorage`)
 
 ---
 

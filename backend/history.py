@@ -12,12 +12,14 @@ import logging
 import sqlite3
 import threading
 import time
-from typing import Any
+from typing import Any, Literal
 
 import psutil
 
 import config
 import metrics
+
+HistoryRange = Literal["1h", "6h", "24h"]
 
 logger = logging.getLogger("dashboard.history")
 
@@ -82,7 +84,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 
 def record_sample() -> dict[str, Any]:
-    """Collect one sample and persist it. Returns the stored row."""
+    """Collect one sample and persist it, returning the stored row."""
     global _prev_net, _prev_disk, _prev_ts, _last_cleanup, _last_sample_ts
 
     now_mono = time.monotonic()
@@ -133,8 +135,8 @@ def record_sample() -> dict[str, Any]:
     return s
 
 
-def query_range(range_str: str = "1h") -> dict[str, Any]:
-    """Return bucketed averages (~HISTORY_MAX_POINTS points) for a range."""
+def query_range(range_str: HistoryRange = "1h") -> dict[str, Any]:
+    """Return bucketed averages for a range, serving the history endpoint."""
     range_sec = _RANGES.get(range_str, 3600)
     bucket = max(range_sec // config.HISTORY_MAX_POINTS, 1)
     since = time.time() - range_sec

@@ -54,8 +54,8 @@ def _parse_json_list(text: str) -> list[dict[str, Any]]:
         if isinstance(data, list):
             return data
         return [data]
-    except json.JSONDecodeError as exc:
-        logger.debug("Failed to parse PowerShell JSON: %s | text=%r", exc, text[:300])
+    except json.JSONDecodeError:
+        logger.exception("Failed to parse PowerShell JSON | text=%r", text[:300])
         return []
 
 
@@ -77,7 +77,7 @@ async def defender_status() -> dict[str, Any]:
             return {"available": True, **rows[0]}
         return {"available": True}  # ran without output (unlikely)
     except Exception as exc:
-        logger.warning("defender_status failed: %s", exc)
+        logger.exception("defender_status failed")
         return {"available": False, "reason": str(exc)}
 
 
@@ -102,8 +102,8 @@ async def failed_logins(limit: int = 100) -> list[dict[str, Any]]:
     try:
         out = await _run_powershell(script, timeout=20.0)
         return _parse_json_list(out)
-    except Exception as exc:
-        logger.warning("failed_logins failed: %s", exc)
+    except Exception:
+        logger.exception("failed_logins failed")
         return []
 
 
@@ -139,8 +139,8 @@ async def list_scheduled_tasks() -> list[dict[str, Any]]:
     try:
         out = await _run_powershell(script, timeout=20.0)
         return _parse_json_list(out)
-    except Exception as exc:
-        logger.warning("list_scheduled_tasks failed: %s", exc)
+    except Exception:
+        logger.exception("list_scheduled_tasks failed")
         return []
 
 
@@ -163,8 +163,8 @@ async def list_installed_programs(limit: int = 200) -> list[dict[str, Any]]:
             return str(r.get("InstallDate") or "")
         rows.sort(key=_key, reverse=True)
         return rows[:limit]
-    except Exception as exc:
-        logger.warning("list_installed_programs failed: %s", exc)
+    except Exception:
+        logger.exception("list_installed_programs failed")
         return []
 
 
@@ -180,8 +180,8 @@ async def user_accounts() -> list[dict[str, Any]]:
     try:
         out = await _run_powershell(script)
         return _parse_json_list(out)
-    except Exception as exc:
-        logger.warning("user_accounts failed: %s", exc)
+    except Exception:
+        logger.exception("user_accounts failed")
         return []
 
 
@@ -202,8 +202,8 @@ async def wifi_profiles() -> list[dict[str, Any]]:
         out = await _run_shell_with_capture(
             "netsh wlan show profiles", timeout=10.0,
         )
-    except Exception as exc:
-        logger.warning("wifi_profiles (list) failed: %s", exc)
+    except Exception:
+        logger.exception("wifi_profiles (list) failed")
         return []
 
     ssids: list[str] = []

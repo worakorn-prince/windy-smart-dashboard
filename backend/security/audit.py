@@ -41,6 +41,7 @@ logger = logging.getLogger("dashboard.audit")
 
 
 def _is_local(ip: str) -> bool:
+    """Return True if IP is empty, private, loopback, or link-local."""
     if not ip:
         return True
     try:
@@ -91,8 +92,8 @@ async def _check_signatures_batch(exe_paths: list[str]) -> dict[str, bool]:
     try:
         from security import winapi
         out = await winapi._run_powershell(script, timeout=20.0)
-    except Exception as exc:
-        logger.debug("signature check failed: %s", exc)
+    except Exception:
+        logger.exception("signature check failed")
         return {p: False for p in exe_paths}
 
     result: dict[str, bool] = {}
@@ -185,6 +186,7 @@ async def _enrich_remotes(est: list[dict[str, Any]],
 
 def _build_findings(data: dict[str, Any],
                     suspicious: list[str]) -> list[Finding]:
+    """Build risk findings from collected audit data."""
     findings: list[Finding] = []
 
     # 1. Listening ports — RDP, SSH, SMB exposure.

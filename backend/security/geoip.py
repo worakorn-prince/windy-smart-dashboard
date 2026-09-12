@@ -112,8 +112,8 @@ async def refresh_tor_exits() -> None:
                     encoding="utf-8",
                 )
                 logger.info("Loaded %d Tor exits", len(_tor_exits))
-        except Exception as exc:
-            logger.warning("Failed to refresh Tor exit list: %s", exc)
+        except Exception:
+            logger.exception("Failed to refresh Tor exit list")
 
 
 def is_tor_exit(ip: str) -> bool:
@@ -154,7 +154,7 @@ async def lookup(ip: str, suspicious: list[str] | None = None) -> dict[str, Any]
                         "reason": f"HTTP {resp.status_code}"}
             data = resp.json()
     except Exception as exc:
-        logger.debug("geoIP lookup for %s failed: %s", ip, exc)
+        logger.exception("geoIP lookup for %s failed", ip)
         return {"ip": ip, "available": False, "reason": str(exc)}
 
     _lookup_window.append(time.time())

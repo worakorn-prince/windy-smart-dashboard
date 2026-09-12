@@ -112,8 +112,8 @@ class SecurityMonitor:
                 continue
             try:
                 await self._emit_geo_result(ip, pid, name)
-            except Exception as exc:
-                logger.debug("geo lookup failed for %s: %s", ip, exc)
+            except Exception:
+                logger.exception("geo lookup failed for %s", ip)
 
     async def _emit(self, evt: Event) -> None:
         if self._on_event:
@@ -194,8 +194,8 @@ class SecurityMonitor:
                         detail={"ip": ip, "port": int(port), "pid": int(pid) if pid.isdigit() else None},
                     ))
                 self._known_ports = seen
-            except Exception as exc:
-                logger.debug("port poll failed: %s", exc)
+            except Exception:
+                logger.exception("port poll failed")
             await asyncio.sleep(SECURITY_PORTS_INTERVAL)
 
     async def _poll_remotes(self) -> None:
@@ -235,8 +235,8 @@ class SecurityMonitor:
                 # Forget old entries that disappeared.
                 self._known_remotes = seen
                 await self._drain_geo_queue()
-            except Exception as exc:
-                logger.debug("remotes poll failed: %s", exc)
+            except Exception:
+                logger.exception("remotes poll failed")
             await asyncio.sleep(SECURITY_CONNECTIONS_INTERVAL)
 
     async def _poll_failed_logins(self) -> None:
@@ -271,8 +271,8 @@ class SecurityMonitor:
                         self._known_failed_ips.add(key)
                 if len(self._known_failed_ips) > 500:
                     self._known_failed_ips = set(list(self._known_failed_ips)[-500:])
-            except Exception as exc:
-                logger.debug("failed logins poll failed: %s", exc)
+            except Exception:
+                logger.exception("failed logins poll failed")
             await asyncio.sleep(SECURITY_FAILED_LOGINS_INTERVAL)
 
     async def _poll_defender(self) -> None:
@@ -299,6 +299,6 @@ class SecurityMonitor:
                                 detail=status,
                             ))
                     prev_rt = rt
-            except Exception as exc:
-                logger.debug("defender poll failed: %s", exc)
+            except Exception:
+                logger.exception("defender poll failed")
             await asyncio.sleep(SECURITY_DEFENDER_INTERVAL)

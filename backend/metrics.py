@@ -1113,6 +1113,7 @@ def _get_battery_info() -> dict[str, Any] | None:
 # =============================================================================
 
 def live_snapshot() -> dict[str, Any]:
+    """Return current CPU/RAM/network/disk snapshot."""
     send_rate, recv_rate = _net_rates()
     read_rate, write_rate = _disk_rates()
     return {

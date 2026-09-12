@@ -16,6 +16,8 @@ interface SeriesDef {
   div?: number
 }
 
+const BYTES_PER_MB = 1024 * 1024
+
 const SERIES_DEFS: SeriesDef[] = [
   { key: 'cpu_pct', label: 'CPU %', scale: '%', stroke: '#4fc3f7' },
   { key: 'ram_pct', label: 'RAM %', scale: '%', stroke: '#aed581' },
@@ -24,14 +26,19 @@ const SERIES_DEFS: SeriesDef[] = [
   { key: 'disk_temp_max', label: 'Disk °C', scale: '°C', stroke: '#ffb74d' },
   { key: 'cpu_power_w', label: 'CPU W', scale: 'W', stroke: '#fff176' },
   { key: 'gpu_power_w', label: 'GPU W', scale: 'W', stroke: '#ff8a65' },
-  { key: 'net_recv_bps', label: 'Net ↓ MB/s', scale: 'MB/s', stroke: '#64b5f6', div: 1048576 },
-  { key: 'net_sent_bps', label: 'Net ↑ MB/s', scale: 'MB/s', stroke: '#9575cd', div: 1048576 },
-  { key: 'disk_read_bps', label: 'Disk R MB/s', scale: 'MB/s', stroke: '#81c784', div: 1048576 },
-  { key: 'disk_write_bps', label: 'Disk W MB/s', scale: 'MB/s', stroke: '#e57373', div: 1048576 },
+  { key: 'net_recv_bps', label: 'Net ↓ MB/s', scale: 'MB/s', stroke: '#64b5f6', div: BYTES_PER_MB },
+  { key: 'net_sent_bps', label: 'Net ↑ MB/s', scale: 'MB/s', stroke: '#9575cd', div: BYTES_PER_MB },
+  { key: 'disk_read_bps', label: 'Disk R MB/s', scale: 'MB/s', stroke: '#81c784', div: BYTES_PER_MB },
+  { key: 'disk_write_bps', label: 'Disk W MB/s', scale: 'MB/s', stroke: '#e57373', div: BYTES_PER_MB },
 ]
 
 const RANGES: HistoryRange[] = ['1h', '6h', '24h']
-const enabled = ref<SeriesKey[]>(['cpu_pct', 'ram_pct', 'cpu_temp', 'gpu_temp', 'cpu_power_w', 'gpu_power_w'])
+const STORAGE_KEY = 'history.enabled'
+// Default to 6 of 11 series (CPU/RAM + temps + power): keeps the chart
+// readable on first load; throughput series (net/disk MB/s) and disk temp
+// stay one click away via toggles to avoid scale clutter.
+const DEFAULT_ENABLED: SeriesKey[] = ['cpu_pct', 'ram_pct', 'cpu_temp', 'gpu_temp', 'cpu_power_w', 'gpu_power_w']
+const enabled = ref<SeriesKey[]>([...DEFAULT_ENABLED])
 
 const chartEl = ref<HTMLElement | null>(null)
 let uplot: uPlot | null = null
@@ -44,6 +51,19 @@ let lastSig = ''
 const THERMAL_KEYS: readonly SeriesKey[] = ['cpu_temp', 'gpu_temp', 'disk_temp_max', 'cpu_power_w', 'gpu_power_w']
 const hasThermalData = computed(() =>
   store.points.some(p => THERMAL_KEYS.some(k => p[k] != null)))
+const refreshing = computed(() => store.loading && store.points.length > 0)
+
+function loadEnabled(): void {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return
+    const valid = parsed.filter((k): k is SeriesKey =>
+      SERIES_DEFS.some(d => d.key === k))
+    if (valid.length) enabled.value = valid
+  } catch { /* keep defaults on corrupt storage */ }
+}
 
 function toggle(key: SeriesKey) {
   const i = enabled.value.indexOf(key)
@@ -147,6 +167,7 @@ function scheduleRender() {
 }
 
 onMounted(async () => {
+  loadEnabled()
   await store.load()
   render()
   resizeObs = new ResizeObserver(() => {
@@ -162,6 +183,10 @@ onMounted(async () => {
 
 watch([enabled, () => store.points], () => scheduleRender())
 
+watch(enabled, (v) => {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(v)) } catch { /* storage unavailable */ }
+})
+
 onBeforeUnmount(() => {
   if (refreshTimer) window.clearInterval(refreshTimer)
   if (renderTimer) window.clearTimeout(renderTimer)
@@ -173,7 +198,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="card history-card">
     <div class="head">
-      <h3>History</h3>
+      <h3>History <span v-if="refreshing" class="updating">Updating…</span></h3>
       <div class="ranges">
         <button
           v-for="r in RANGES"
@@ -196,6 +221,7 @@ onBeforeUnmount(() => {
       >{{ d.label }}</button>
     </div>
 
+    <p v-if="store.loading && !store.points.length" class="hint">Loading history…</p>
     <p v-if="store.error" class="hint bad-text">Failed to load history: {{ store.error }}</p>
     <p v-else-if="!store.loading && !store.points.length" class="hint">
       No samples yet — collecting every 10s.
@@ -226,7 +252,8 @@ onBeforeUnmount(() => {
   color: var(--chip-color); border-color: var(--chip-color);
   background: color-mix(in srgb, var(--chip-color) 14%, transparent);
 }
-.chart { min-width: 0; }
+.chart { min-width: 0; cursor: crosshair; }
 .hint { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
+.updating { color: var(--muted); font-size: 11px; font-weight: 400; }
 .bad-text { color: var(--bad); }
 </style>
