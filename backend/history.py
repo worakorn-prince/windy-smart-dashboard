@@ -39,6 +39,7 @@ _COLS = ("cpu_pct", "ram_pct", "swap_pct", "cpu_temp", "gpu_temp", "disk_temp_ma
 _RANGES: dict[str, int] = {"1h": 3600, "6h": 21600, "24h": 86400}
 
 _lock = threading.Lock()
+_prev_lock = threading.Lock()
 _conn: sqlite3.Connection | None = None
 
 _prev_net = psutil.net_io_counters()
@@ -73,15 +74,15 @@ def record_sample() -> dict[str, Any]:
     global _prev_net, _prev_disk, _prev_ts, _last_cleanup
 
     now_mono = time.monotonic()
-    dt = max(now_mono - _prev_ts, 0.001)
-
     cur_net = psutil.net_io_counters()
     cur_disk = psutil.disk_io_counters()
-    net_sent_bps = max((cur_net.bytes_sent - _prev_net.bytes_sent) / dt, 0)
-    net_recv_bps = max((cur_net.bytes_recv - _prev_net.bytes_recv) / dt, 0)
-    disk_read_bps = max((cur_disk.read_bytes - _prev_disk.read_bytes) / dt, 0)
-    disk_write_bps = max((cur_disk.write_bytes - _prev_disk.write_bytes) / dt, 0)
-    _prev_net, _prev_disk, _prev_ts = cur_net, cur_disk, now_mono
+    with _prev_lock:
+        dt = max(now_mono - _prev_ts, 0.001)
+        net_sent_bps = max((cur_net.bytes_sent - _prev_net.bytes_sent) / dt, 0)
+        net_recv_bps = max((cur_net.bytes_recv - _prev_net.bytes_recv) / dt, 0)
+        disk_read_bps = max((cur_disk.read_bytes - _prev_disk.read_bytes) / dt, 0)
+        disk_write_bps = max((cur_disk.write_bytes - _prev_disk.write_bytes) / dt, 0)
+        _prev_net, _prev_disk, _prev_ts = cur_net, cur_disk, now_mono
 
     s = metrics.light_snapshot()
     s.update({

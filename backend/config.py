@@ -50,6 +50,11 @@ FRONTEND_DIST = BASE_DIR.parent / "frontend" / "dist"
 # System-critical PIDs that we refuse to kill (cannot kill 0 / 4 on Windows).
 PROTECTED_PIDS = {0, 4}
 
+# Admin token for privileged security endpoints (kill/block/unblock).
+# Set DASH_ADMIN_TOKEN env in production. When empty, those endpoints
+# accept loopback clients (127.0.0.1/::1) only.
+ADMIN_TOKEN = os.environ.get("DASH_ADMIN_TOKEN", "")
+
 # Metrics history (SQLite, WAL).
 HISTORY_DB = CACHE_DIR / "history.db"
 HISTORY_SAMPLE_INTERVAL = float(os.environ.get("DASH_HISTORY_INTERVAL", "10.0"))

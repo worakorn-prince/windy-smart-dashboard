@@ -20,15 +20,17 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 import json
 import logging
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -128,9 +130,24 @@ app.add_middleware(
     allow_origins=[f"http://localhost:{config.PORT}", "http://127.0.0.1:5173",
                    "http://localhost:5173"],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Admin-Token"],
 )
+
+LOOPBACK_HOSTS = {"127.0.0.1", "::1"}
+_UNBLOCK_RULE_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+
+
+async def require_admin(request: Request) -> None:
+    expected = config.ADMIN_TOKEN
+    if expected:
+        provided = request.headers.get("x-admin-token", "")
+        if provided != expected:
+            raise HTTPException(status_code=401, detail="unauthorized")
+        return
+    client = request.client.host if request.client else ""
+    if client not in LOOPBACK_HOSTS:
+        raise HTTPException(status_code=403, detail="forbidden: loopback only")
 
 
 # ---- Background pushers ---- #
@@ -278,7 +295,7 @@ async def api_audit() -> dict[str, Any]:
 
 
 @app.post("/api/security/kill")
-async def api_kill(payload: dict[str, Any]) -> dict[str, Any]:
+async def api_kill(payload: dict[str, Any], _admin: None = Depends(require_admin)) -> dict[str, Any]:
     pid = payload.get("pid")
     force = bool(payload.get("force", False))
     if not isinstance(pid, int):
@@ -287,18 +304,22 @@ async def api_kill(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.post("/api/security/block")
-async def api_block(payload: dict[str, Any]) -> dict[str, Any]:
+async def api_block(payload: dict[str, Any], _admin: None = Depends(require_admin)) -> dict[str, Any]:
     ip = (payload.get("ip") or "").strip()
-    if not ip:
-        return {"ok": False, "reason": "invalid_ip"}
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail="invalid_ip") from err
     return await actions.block_ip(ip)
 
 
 @app.post("/api/security/unblock")
-async def api_unblock(payload: dict[str, Any]) -> dict[str, Any]:
+async def api_unblock(payload: dict[str, Any], _admin: None = Depends(require_admin)) -> dict[str, Any]:
     rule = payload.get("rule_name")
     if not rule:
-        return {"ok": False, "reason": "missing_rule_name"}
+        raise HTTPException(status_code=422, detail="missing_rule_name")
+    if not isinstance(rule, str) or not _UNBLOCK_RULE_RE.match(rule):
+        raise HTTPException(status_code=422, detail="invalid_rule_name")
     return await actions.unblock_ip(rule)
 
 

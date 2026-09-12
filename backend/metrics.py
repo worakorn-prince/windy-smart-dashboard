@@ -25,6 +25,8 @@ _wmi_cache: dict[str, Any] = {}
 _wmi_cache_ts: dict[str, float] = {}
 _wmi_cache_ttl = 30.0  # seconds
 _wmi_lock = threading.Lock()
+_net_lock = threading.Lock()
+_disk_lock = threading.Lock()
 
 
 def _delta_per_sec(cur: int, prev: int, dt: float) -> float:
@@ -518,9 +520,14 @@ _last_disk_ts = time.monotonic()
 
 def disk_snapshot() -> dict[str, Any]:
     global _last_disk_io, _last_disk_ts
-    now = time.monotonic()
-    dt = now - _last_disk_ts
-    _last_disk_ts = now
+    with _disk_lock:
+        now = time.monotonic()
+        dt = now - _last_disk_ts
+        _last_disk_ts = now
+        cur = psutil.disk_io_counters()
+        read_rate = _delta_per_sec(cur.read_bytes, _last_disk_io.read_bytes, dt) if cur and _last_disk_io else 0
+        write_rate = _delta_per_sec(cur.write_bytes, _last_disk_io.write_bytes, dt) if cur and _last_disk_io else 0
+        _last_disk_io = cur or _last_disk_io
     partitions: list[dict[str, Any]] = []
     for p in psutil.disk_partitions(all=False):
         try:
@@ -536,11 +543,6 @@ def disk_snapshot() -> dict[str, Any]:
             })
         except (PermissionError, OSError):
             continue
-
-    cur = psutil.disk_io_counters()
-    read_rate = _delta_per_sec(cur.read_bytes, _last_disk_io.read_bytes, dt) if cur and _last_disk_io else 0
-    write_rate = _delta_per_sec(cur.write_bytes, _last_disk_io.write_bytes, dt) if cur and _last_disk_io else 0
-    _last_disk_io = cur or _last_disk_io
 
     disk_details = _get_disk_details()
     disk_temps = _get_disk_temperatures()
@@ -704,13 +706,14 @@ _last_net_ts = time.monotonic()
 
 def network_snapshot() -> dict[str, Any]:
     global _last_net_io, _last_net_ts
-    now = time.monotonic()
-    dt = now - _last_net_ts
-    _last_net_ts = now
-    cur = psutil.net_io_counters()
-    send_rate = _delta_per_sec(cur.bytes_sent, _last_net_io.bytes_sent, dt)
-    recv_rate = _delta_per_sec(cur.bytes_recv, _last_net_io.bytes_recv, dt)
-    _last_net_io = cur
+    with _net_lock:
+        now = time.monotonic()
+        dt = now - _last_net_ts
+        _last_net_ts = now
+        cur = psutil.net_io_counters()
+        send_rate = _delta_per_sec(cur.bytes_sent, _last_net_io.bytes_sent, dt)
+        recv_rate = _delta_per_sec(cur.bytes_recv, _last_net_io.bytes_recv, dt)
+        _last_net_io = cur
 
     addrs: dict[str, list[str]] = {}
     for name, snics in psutil.net_if_addrs().items():
