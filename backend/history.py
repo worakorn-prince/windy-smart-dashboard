@@ -7,6 +7,7 @@ their rate timestamps.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import sqlite3
 import threading
@@ -20,6 +21,8 @@ import metrics
 
 logger = logging.getLogger("dashboard.history")
 
+_SCHEMA_VERSION = 2
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS samples(
     ts REAL PRIMARY KEY,
@@ -29,6 +32,7 @@ CREATE TABLE IF NOT EXISTS samples(
     net_sent_bps REAL, net_recv_bps REAL,
     disk_read_bps REAL, disk_write_bps REAL
 );
+CREATE TABLE IF NOT EXISTS schema_version(version INTEGER PRIMARY KEY);
 """
 
 _COLS = ("cpu_pct", "ram_pct", "swap_pct", "cpu_temp", "gpu_temp", "disk_temp_max",
@@ -46,6 +50,7 @@ _prev_net = psutil.net_io_counters()
 _prev_disk = psutil.disk_io_counters()
 _prev_ts = time.monotonic()
 _last_cleanup = 0.0
+_last_sample_ts = 0.0
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -61,17 +66,24 @@ def _get_conn() -> sqlite3.Connection:
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
-    """Add columns that may be missing on databases created by older builds."""
-    existing = {row[1] for row in conn.execute("PRAGMA table_info(samples)")}
-    for col in ("cpu_power_w", "gpu_power_w"):
-        if col not in existing:
-            conn.execute(f"ALTER TABLE samples ADD COLUMN {col} REAL")
+    row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
+    version = row[0] if row and row[0] else 0
+    if version == 0:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(samples)")}
+        version = 2 if {"cpu_power_w", "gpu_power_w"} <= existing else 1
+    if version < 2:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(samples)")}
+        for col in ("cpu_power_w", "gpu_power_w"):
+            if col not in existing:
+                conn.execute(f"ALTER TABLE samples ADD COLUMN {col} REAL")
+        version = 2
+    conn.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (?)", (version,))
     conn.commit()
 
 
 def record_sample() -> dict[str, Any]:
     """Collect one sample and persist it. Returns the stored row."""
-    global _prev_net, _prev_disk, _prev_ts, _last_cleanup
+    global _prev_net, _prev_disk, _prev_ts, _last_cleanup, _last_sample_ts
 
     now_mono = time.monotonic()
     cur_net = psutil.net_io_counters()
@@ -85,8 +97,12 @@ def record_sample() -> dict[str, Any]:
         _prev_net, _prev_disk, _prev_ts = cur_net, cur_disk, now_mono
 
     s = metrics.light_snapshot()
+    ts = time.time()
+    if ts <= _last_sample_ts:
+        ts = _last_sample_ts + 0.001
+    _last_sample_ts = ts
     s.update({
-        "ts": time.time(),
+        "ts": ts,
         "net_sent_bps": round(net_sent_bps),
         "net_recv_bps": round(net_recv_bps),
         "disk_read_bps": round(disk_read_bps),
@@ -96,7 +112,7 @@ def record_sample() -> dict[str, Any]:
     with _lock:
         conn = _get_conn()
         conn.execute(
-            "INSERT OR REPLACE INTO samples VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR IGNORE INTO samples VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (s["ts"], s["cpu_pct"], s["ram_pct"], s["swap_pct"],
              s["cpu_temp"], s["gpu_temp"], s["disk_temp_max"],
              s["cpu_power_w"], s["gpu_power_w"],
@@ -111,6 +127,8 @@ def record_sample() -> dict[str, Any]:
         with _lock:
             _get_conn().execute("DELETE FROM samples WHERE ts < ?", (cutoff,))
             _get_conn().commit()
+            with contextlib.suppress(sqlite3.Error):
+                _get_conn().execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     return s
 

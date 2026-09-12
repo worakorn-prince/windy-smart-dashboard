@@ -9,11 +9,9 @@
     "preview": "vite preview --port 4173"
   },
   "dependencies": {
-    "chart.js": "^4.4.3",
     "pinia": "^2.1.7",
     "uplot": "^1.6.32",
     "vue": "^3.4.27",
-    "vue-chartjs": "^5.3.1",
     "vue-router": "^4.3.2"
   },
   "devDependencies": {

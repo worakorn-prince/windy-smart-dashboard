@@ -43,6 +43,7 @@ from alerts import evaluate as evaluate_alerts, send_toast
 from config import (
     FRONTEND_DIST,
     HOST,
+    METRICS_FULL_INTERVAL,
     METRICS_INTERVAL,
     PING_TARGET,
     PROCESS_INTERVAL,
@@ -102,6 +103,12 @@ load_suspicious()
 async def lifespan(app: FastAPI):
     global sec_mon
     logger.info("Dashboard starting on http://%s:%d", HOST, config.PORT)
+    try:
+        import sensors_lhm
+
+        sensors_lhm.log_startup_status()
+    except Exception:
+        logger.debug("sensor startup log skipped", exc_info=True)
 
     async def _sec_emit(evt) -> None:
         await manager.broadcast("security", {"type": "security_event", **evt.to_dict()})
@@ -153,19 +160,18 @@ async def require_admin(request: Request) -> None:
 # ---- Background pushers ---- #
 
 async def _metrics_loop() -> None:
-    """Push full metrics snapshot every METRICS_INTERVAL seconds.
+    """Push light live_snapshot() at 1Hz plus full_snapshot() periodically.
 
-    full_snapshot() performs blocking subprocess/WMI calls, so it runs in a
-    worker thread to keep the event loop (and thus WebSocket broadcasts)
-    responsive.
+    Live payload keeps the "metrics" type so the frontend consumes it as
+    before; the full snapshot (WMI-heavy) runs every METRICS_FULL_INTERVAL.
     """
     last_ping = 0.0
     last_ping_v = 0.0
     ping_period = 5.0
+    last_full = 0.0
     while True:
         try:
-            snap = await asyncio.to_thread(metrics.full_snapshot)
-            # Ping latency (best-effort, low frequency to avoid noise).
+            snap = await asyncio.to_thread(metrics.live_snapshot)
             now = asyncio.get_event_loop().time()
             if now - last_ping > ping_period:
                 last_ping = now
@@ -174,6 +180,11 @@ async def _metrics_loop() -> None:
                     last_ping_v = ping
             snap["ping"] = {"target": PING_TARGET, "latency_ms": last_ping_v}
             await manager.broadcast("metrics", {"type": "metrics", **snap})
+            if now - last_full >= METRICS_FULL_INTERVAL:
+                last_full = now
+                full = await asyncio.to_thread(metrics.full_snapshot)
+                full["ping"] = {"target": PING_TARGET, "latency_ms": last_ping_v}
+                await manager.broadcast("metrics", {"type": "metrics", **full})
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -251,6 +262,31 @@ async def _quick_ping(host: str, timeout: float = 1.0) -> float | None:
 async def get_system() -> dict[str, Any]:
     return {"system": metrics.system_snapshot(), "cpu": metrics.cpu_snapshot(),
             "ram": metrics.ram_snapshot(), "gpu": metrics.gpu_snapshot()}
+
+
+@app.get("/api/sensors/status")
+async def api_sensors_status() -> dict[str, Any]:
+    """Sanitized LHM init status (no paths or tracebacks exposed)."""
+    try:
+        import sensors_lhm
+
+        st = sensors_lhm.get_status()
+        return {
+            "lhm_available": bool(st.get("available")),
+            "elevated": bool(st.get("elevated")),
+            "state": st.get("state"),
+            "reason": st.get("reason"),
+            "message": st.get("message"),
+        }
+    except Exception:
+        logger.debug("sensors status failed", exc_info=True)
+        return {
+            "lhm_available": False,
+            "elevated": False,
+            "state": "unknown",
+            "reason": "unknown",
+            "message": "Sensor status unavailable.",
+        }
 
 
 @app.get("/api/history")

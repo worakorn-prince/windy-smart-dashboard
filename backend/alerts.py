@@ -63,8 +63,17 @@ async def send_toast(title: str, message: str) -> None:
 
 def _check(rule_id: str, title: str, value: float | None,
            threshold: float, unit: str = "") -> dict[str, Any] | None:
-    st = _state.setdefault(rule_id, {"breaches": 0, "last_fired": 0.0})
-    if value is None or value < threshold:
+    st = _state.setdefault(rule_id, {"breaches": 0, "last_fired": 0.0,
+                                     "gaps": 0, "recoveries": 0})
+    if value is None:
+        st["breaches"] = 0
+        st["gaps"] += 1
+        logger.debug("alert %s gap (sensor None) gaps=%d", rule_id, st["gaps"])
+        return None
+    if value < threshold:
+        if st["breaches"] > 0:
+            st["recoveries"] += 1
+            logger.debug("alert %s recovered recoveries=%d", rule_id, st["recoveries"])
         st["breaches"] = 0
         return None
     st["breaches"] += 1

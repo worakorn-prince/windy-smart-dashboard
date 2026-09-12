@@ -2,12 +2,14 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
-import { useHistoryStore, type HistoryRange } from '@/stores/history'
+import { useHistoryStore, type HistoryPoint, type HistoryRange } from '@/stores/history'
 
 const store = useHistoryStore()
 
+type SeriesKey = Exclude<keyof HistoryPoint, 'ts'>
+
 interface SeriesDef {
-  key: string
+  key: SeriesKey
   label: string
   scale: string
   stroke: string
@@ -29,18 +31,21 @@ const SERIES_DEFS: SeriesDef[] = [
 ]
 
 const RANGES: HistoryRange[] = ['1h', '6h', '24h']
-const enabled = ref<string[]>(['cpu_pct', 'ram_pct', 'cpu_temp', 'gpu_temp', 'cpu_power_w', 'gpu_power_w'])
+const enabled = ref<SeriesKey[]>(['cpu_pct', 'ram_pct', 'cpu_temp', 'gpu_temp', 'cpu_power_w', 'gpu_power_w'])
 
 const chartEl = ref<HTMLElement | null>(null)
 let uplot: uPlot | null = null
 let resizeObs: ResizeObserver | null = null
 let refreshTimer: number | null = null
+let renderTimer: number | null = null
+let lastSig = ''
 
-const hasTempData = computed(() =>
-  store.points.some(p =>
-    p.cpu_temp != null || p.gpu_temp != null || p.disk_temp_max != null))
+// Thermal/power sensors (need admin elevation); covers every °C/W series in SERIES_DEFS.
+const THERMAL_KEYS: readonly SeriesKey[] = ['cpu_temp', 'gpu_temp', 'disk_temp_max', 'cpu_power_w', 'gpu_power_w']
+const hasThermalData = computed(() =>
+  store.points.some(p => THERMAL_KEYS.some(k => p[k] != null)))
 
-function toggle(key: string) {
+function toggle(key: SeriesKey) {
   const i = enabled.value.indexOf(key)
   // Reassign (not mutate) so the watch() source reference changes and
   // the chart re-renders immediately.
@@ -71,16 +76,14 @@ function fmtVal(d: SeriesDef, v: number | null): string {
   return v.toFixed(0)
 }
 
-function buildData() {
+function buildData(): uPlot.AlignedData {
   const pts = store.points
-  const data: (number | null)[][] = [pts.map(p => p.ts)]
-  for (const d of activeDefs()) {
-    data.push(pts.map(p => {
-      const v = (p as unknown as Record<string, number | null>)[d.key]
-      return v == null ? null : (d.div ? v / d.div : v)
-    }))
-  }
-  return data
+  const x: number[] = pts.map(p => p.ts)
+  const ys: (number | null)[][] = activeDefs().map(d => pts.map(p => {
+    const v: number | null = p[d.key]
+    return v == null ? null : (d.div ? v / d.div : v)
+  }))
+  return [x, ...ys]
 }
 
 function render() {
@@ -123,7 +126,24 @@ function render() {
     uplot.destroy()
     uplot = null
   }
-  uplot = new uPlot(opts, buildData() as uPlot.AlignedData, chartEl.value)
+  uplot = new uPlot(opts, buildData(), chartEl.value)
+  lastSig = chartSig(defs)
+}
+
+function chartSig(defs: SeriesDef[]): string {
+  const pts = store.points
+  const last = pts.length ? pts[pts.length - 1]!.ts : 0
+  return `${store.range}|${defs.map(d => d.key).join(',')}|${pts.length}|${last}`
+}
+
+function scheduleRender() {
+  if (renderTimer) window.clearTimeout(renderTimer)
+  renderTimer = window.setTimeout(() => {
+    renderTimer = null
+    if (!chartEl.value) return
+    if (chartSig(activeDefs()) === lastSig) return
+    render()
+  }, 120)
 }
 
 onMounted(async () => {
@@ -140,10 +160,11 @@ onMounted(async () => {
   }, 60000)
 })
 
-watch([enabled, () => store.points], () => render())
+watch([enabled, () => store.points], () => scheduleRender())
 
 onBeforeUnmount(() => {
   if (refreshTimer) window.clearInterval(refreshTimer)
+  if (renderTimer) window.clearTimeout(renderTimer)
   if (resizeObs) resizeObs.disconnect()
   if (uplot) uplot.destroy()
 })
@@ -179,7 +200,7 @@ onBeforeUnmount(() => {
     <p v-else-if="!store.loading && !store.points.length" class="hint">
       No samples yet — collecting every 10s.
     </p>
-    <p v-else-if="!hasTempData" class="hint">
+    <p v-else-if="!hasThermalData" class="hint">
       Temperatures need admin elevation — run via elevated PowerShell.
     </p>
 

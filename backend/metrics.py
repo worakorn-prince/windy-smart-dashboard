@@ -76,28 +76,34 @@ def _run_powershell_sync(script: str, timeout: float = 10.0) -> str:
 
 
 def _get_wmi_cached(key: str, script: str | None, ttl: float = 30.0) -> Any:
-    """Get WMI data with caching. Failures are NOT cached (retry next call)."""
+    """Get WMI data with caching. Failures are NOT cached (retry next call).
+
+    Locking: one short _wmi_lock hold for the lookup, slow PowerShell I/O
+    runs lock-free, then one short _wmi_lock hold for check-and-write.
+    Never nests _net_lock/_disk_lock inside, never calls history here.
+    """
     import json
     now = time.time()
-    cached = _wmi_cache.get(key)
-    if cached is not None and (now - _wmi_cache_ts.get(key, 0)) < ttl:
-        return cached
-    if script is None:
-        return None
     with _wmi_lock:
-        # Double-check inside the lock (another thread may have filled it).
         cached = _wmi_cache.get(key)
         if cached is not None and (now - _wmi_cache_ts.get(key, 0)) < ttl:
             return cached
-        try:
-            output = _run_powershell_sync(script, timeout=15.0)
-            data = json.loads(output) if output.strip() else None
-            if data is not None:
-                _wmi_cache[key] = data
-                _wmi_cache_ts[key] = now
-            return data
-        except (json.JSONDecodeError, Exception):
-            return None
+    if script is None:
+        return None
+    try:
+        output = _run_powershell_sync(script, timeout=15.0)
+        data = json.loads(output) if output.strip() else None
+    except (json.JSONDecodeError, Exception):
+        return None
+    if data is None:
+        return None
+    with _wmi_lock:
+        cached = _wmi_cache.get(key)
+        if cached is not None and (now - _wmi_cache_ts.get(key, 0)) < ttl:
+            return cached
+        _wmi_cache[key] = data
+        _wmi_cache_ts[key] = now
+        return data
 
 
 def cpu_snapshot() -> dict[str, Any]:
@@ -518,7 +524,7 @@ _last_disk_io = psutil.disk_io_counters()
 _last_disk_ts = time.monotonic()
 
 
-def disk_snapshot() -> dict[str, Any]:
+def _disk_rates() -> tuple[float, float]:
     global _last_disk_io, _last_disk_ts
     with _disk_lock:
         now = time.monotonic()
@@ -528,6 +534,11 @@ def disk_snapshot() -> dict[str, Any]:
         read_rate = _delta_per_sec(cur.read_bytes, _last_disk_io.read_bytes, dt) if cur and _last_disk_io else 0
         write_rate = _delta_per_sec(cur.write_bytes, _last_disk_io.write_bytes, dt) if cur and _last_disk_io else 0
         _last_disk_io = cur or _last_disk_io
+    return read_rate, write_rate
+
+
+def disk_snapshot() -> dict[str, Any]:
+    read_rate, write_rate = _disk_rates()
     partitions: list[dict[str, Any]] = []
     for p in psutil.disk_partitions(all=False):
         try:
@@ -704,7 +715,7 @@ _last_net_io = psutil.net_io_counters()
 _last_net_ts = time.monotonic()
 
 
-def network_snapshot() -> dict[str, Any]:
+def _net_rates() -> tuple[float, float]:
     global _last_net_io, _last_net_ts
     with _net_lock:
         now = time.monotonic()
@@ -714,6 +725,12 @@ def network_snapshot() -> dict[str, Any]:
         send_rate = _delta_per_sec(cur.bytes_sent, _last_net_io.bytes_sent, dt)
         recv_rate = _delta_per_sec(cur.bytes_recv, _last_net_io.bytes_recv, dt)
         _last_net_io = cur
+    return send_rate, recv_rate
+
+
+def network_snapshot() -> dict[str, Any]:
+    send_rate, recv_rate = _net_rates()
+    cur = psutil.net_io_counters()
 
     addrs: dict[str, list[str]] = {}
     for name, snics in psutil.net_if_addrs().items():
@@ -1094,6 +1111,26 @@ def _get_battery_info() -> dict[str, Any] | None:
 # =============================================================================
 # Snapshots
 # =============================================================================
+
+def live_snapshot() -> dict[str, Any]:
+    send_rate, recv_rate = _net_rates()
+    read_rate, write_rate = _disk_rates()
+    return {
+        "ts": time.time(),
+        "cpu": {"overall": round(psutil.cpu_percent(interval=None), 1)},
+        "ram": {"percent": round(psutil.virtual_memory().percent, 1)},
+        "network": {
+            "send_bytes_per_sec": round(send_rate, 0),
+            "recv_bytes_per_sec": round(recv_rate, 0),
+        },
+        "disk": {
+            "io": {
+                "read_bytes_per_sec": round(read_rate, 0),
+                "write_bytes_per_sec": round(write_rate, 0),
+            },
+        },
+    }
+
 
 def full_snapshot() -> dict[str, Any]:
     return {

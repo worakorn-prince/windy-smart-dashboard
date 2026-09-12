@@ -91,6 +91,7 @@ def status_message() -> str:
 _lock = threading.Lock()
 _computer: Any = None
 _init_state: str = ""  # "", "ok", "requires_admin", "no_pythonnet", "failed:<msg>"
+_startup_logged = False
 
 
 def is_admin() -> bool:
@@ -103,6 +104,75 @@ def is_admin() -> bool:
 def init_state() -> str:
     """Return current init state ('', 'ok', 'requires_admin', ...)."""
     return _init_state
+
+
+def public_state() -> str:
+    """Sanitized state code without paths or exception details."""
+    state = _init_state or "pending"
+    return state.split(":", 1)[0]
+
+
+def safe_message() -> str:
+    """Human-readable status without sensitive details (safe for API)."""
+    state = public_state()
+    if state == "ok":
+        return "Hardware sensors active."
+    if state == "requires_admin":
+        return (
+            "Hardware sensors disabled — restart the dashboard as "
+            "Administrator so LibreHardwareMonitor can read temperatures "
+            "and power."
+        )
+    if state == "not_windows":
+        return "Hardware sensors are only supported on Windows."
+    if state == "dll_not_found":
+        return (
+            "LibreHardwareMonitor not found. Install it with "
+            "'winget install -e --id LibreHardwareMonitor.LibreHardwareMonitor' "
+            "and restart as Administrator."
+        )
+    if state == "no_pythonnet":
+        return "pythonnet/clr is not installed in this environment."
+    if state == "failed":
+        return "Hardware sensor init failed. See backend log for details."
+    return "Hardware sensors not initialised yet."
+
+
+def get_status() -> dict[str, Any]:
+    """Sanitized init status for API responses (no paths or tracebacks)."""
+    if not _init_state:
+        with _lock:
+            _init()
+    state = public_state()
+    elevated = is_admin() if sys.platform.startswith("win") else False
+    return {
+        "state": state,
+        "available": state == "ok",
+        "elevated": elevated,
+        "reason": state,
+        "message": safe_message(),
+    }
+
+
+def log_startup_status() -> str:
+    """Ensure init ran once and log clearly why LHM is ready or not."""
+    global _startup_logged
+    if not _init_state:
+        with _lock:
+            _init()
+    state = public_state()
+    if _startup_logged:
+        return state
+    _startup_logged = True
+    if state == "ok":
+        logger.info("LHM ready: hardware temps/power enabled")
+    else:
+        logger.warning(
+            "LHM unavailable (reason=%s): %s Temp/power will be None.",
+            state,
+            safe_message(),
+        )
+    return state
 
 
 def _assembly_resolver(directory: str):
@@ -145,17 +215,27 @@ def _init() -> None:
 
     if not sys.platform.startswith("win"):
         _init_state = "not_windows"
+        logger.warning(
+            "LHM unavailable (reason=not_windows): Windows only. Temp/power will be None."
+        )
         return
     if not is_admin():
         _init_state = "requires_admin"
-        logger.info("LHM: backend not elevated - hardware temps disabled")
+        logger.warning(
+            "LHM unavailable (reason=requires_admin): backend not elevated — "
+            "restart as Administrator. Temp/power will be None."
+        )
         return
 
     dll_dir = _resolve_lhm_dir()
     dll_path = os.path.join(dll_dir, "LibreHardwareMonitorLib.dll")
     if not os.path.exists(dll_path):
         _init_state = f"dll_not_found:{dll_path}"
-        logger.warning("LHM DLL missing: %s", dll_path)
+        logger.warning(
+            "LHM unavailable (reason=dll_not_found): %s missing. "
+            "Install via winget and restart as Administrator. Temp/power will be None.",
+            dll_path,
+        )
         return
 
     try:
@@ -181,10 +261,10 @@ def _init() -> None:
 
         _computer = comp
         _init_state = "ok"
-        logger.info("LibreHardwareMonitor initialized in-process")
+        logger.info("LHM ready: LibreHardwareMonitor initialized in-process")
     except Exception as exc:
         _init_state = f"failed:{exc}"
-        logger.warning("LHM init failed: %s", exc)
+        logger.warning("LHM unavailable (reason=init_failed): %s. Temp/power will be None.", exc)
 
 
 def read_all_sensors() -> list[dict[str, Any]]:

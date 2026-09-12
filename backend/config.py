@@ -19,6 +19,7 @@ PORT = int(os.environ.get("DASH_PORT", "8000"))
 
 # WebSocket push interval (seconds) for metrics.
 METRICS_INTERVAL = float(os.environ.get("DASH_METRICS_INTERVAL", "1.0"))
+METRICS_FULL_INTERVAL = float(os.environ.get("DASH_METRICS_FULL_INTERVAL", "30.0"))
 PROCESS_INTERVAL = float(os.environ.get("DASH_PROCESS_INTERVAL", "3.0"))
 UPTIME_INTERVAL = float(os.environ.get("DASH_UPTIME_INTERVAL", "5.0"))
 

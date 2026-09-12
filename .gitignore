@@ -27,7 +27,8 @@ frontend/dist/
 .DS_Store
 Thumbs.db
 
-# Thai-only documentation (local reading copy, not published to GitHub)
+# README.th.md is git-ignored and untracked (only README.md is tracked)
 README.th.md
 design.md
 
+.openvisio/

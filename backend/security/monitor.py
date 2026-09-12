@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -16,6 +17,9 @@ from config import DEFAULT_SUSPICIOUS_COUNTRIES
 from security import geoip, winapi
 
 logger = logging.getLogger("dashboard.secmonitor")
+
+_GEO_MAX_LOOKUPS_PER_CYCLE = 3
+_GEO_CACHE_TTL = 86400.0
 
 
 @dataclass
@@ -40,9 +44,76 @@ class SecurityMonitor:
         self._known_remotes: set[str] = set()
         self._known_failed_ips: set[str] = set()
         self.suspicious = suspicious or list(DEFAULT_SUSPICIOUS_COUNTRIES)
+        self._geo_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._geo_pending: list[tuple[str, int | None, str]] = []
+        self._geo_pending_ips: set[str] = set()
 
     def set_on_event(self, cb: Callable[[Event], Awaitable[None]]) -> None:
         self._on_event = cb
+
+    def _geo_cached(self, ip: str) -> dict[str, Any] | None:
+        entry = self._geo_cache.get(ip)
+        if entry is None:
+            return None
+        ts, result = entry
+        if time.monotonic() - ts < _GEO_CACHE_TTL:
+            return result
+        self._geo_cache.pop(ip, None)
+        return None
+
+    def _geo_store(self, ip: str, result: dict[str, Any]) -> None:
+        if result.get("available"):
+            self._geo_cache[ip] = (time.monotonic(), result)
+            if len(self._geo_cache) > 2000:
+                now = time.monotonic()
+                expired = [k for k, (ts, _) in self._geo_cache.items()
+                           if now - ts >= _GEO_CACHE_TTL]
+                for k in expired:
+                    self._geo_cache.pop(k, None)
+
+    def _enqueue_geo(self, ip: str, pid: int | None, name: str) -> None:
+        if self._geo_cached(ip) is not None or ip in self._geo_pending_ips:
+            return
+        self._geo_pending.append((ip, pid, name))
+        self._geo_pending_ips.add(ip)
+
+    async def _emit_geo_result(self, ip: str, pid: int | None, name: str) -> None:
+        cached = self._geo_cached(ip)
+        if cached is not None:
+            geo = cached
+        else:
+            geo = await geoip.lookup(ip, suspicious=self.suspicious)
+            self._geo_store(ip, geo)
+        if not geo.get("available"):
+            return
+        if geo.get("suspicious_country"):
+            await self._emit(Event(
+                type="suspicious_outbound",
+                timestamp=datetime.now().isoformat(),
+                title=f"⚠️ Outbound to suspicious country {geo.get('country_code')}",
+                detail={"ip": ip, "country": geo.get("country"),
+                        "country_code": geo.get("country_code"),
+                        "isp": geo.get("isp"), "pid": pid, "name": name},
+            ))
+        if geo.get("is_tor"):
+            await self._emit(Event(
+                type="tor_outbound",
+                timestamp=datetime.now().isoformat(),
+                title=f"⚠️ Outbound to Tor exit node {ip}",
+                detail={"ip": ip, "pid": pid, "name": name},
+            ))
+
+    async def _drain_geo_queue(self) -> None:
+        for _ in range(min(_GEO_MAX_LOOKUPS_PER_CYCLE, len(self._geo_pending))):
+            ip, pid, name = self._geo_pending.pop(0)
+            self._geo_pending_ips.discard(ip)
+            if self._geo_cached(ip) is not None:
+                await self._emit_geo_result(ip, pid, name)
+                continue
+            try:
+                await self._emit_geo_result(ip, pid, name)
+            except Exception as exc:
+                logger.debug("geo lookup failed for %s: %s", ip, exc)
 
     async def _emit(self, evt: Event) -> None:
         if self._on_event:
@@ -160,27 +231,10 @@ class SecurityMonitor:
                                 title=f"{name or 'process'} → {ip}:{c.raddr.port}",
                                 detail={"ip": ip, "port": c.raddr.port, "pid": c.pid, "name": name},
                             ))
-                            # geoIP lookup
-                            geo = await geoip.lookup(ip, suspicious=self.suspicious)
-                            if geo.get("available"):
-                                if geo.get("suspicious_country"):
-                                    await self._emit(Event(
-                                        type="suspicious_outbound",
-                                        timestamp=datetime.now().isoformat(),
-                                        title=f"⚠️ Outbound to suspicious country {geo.get('country_code')}",
-                                        detail={"ip": ip, "country": geo.get("country"),
-                                                "country_code": geo.get("country_code"),
-                                                "isp": geo.get("isp"), "pid": c.pid, "name": name},
-                                    ))
-                                if geo.get("is_tor"):
-                                    await self._emit(Event(
-                                        type="tor_outbound",
-                                        timestamp=datetime.now().isoformat(),
-                                        title=f"⚠️ Outbound to Tor exit node {ip}",
-                                        detail={"ip": ip, "pid": c.pid, "name": name},
-                                    ))
+                            self._enqueue_geo(ip, c.pid, name)
                 # Forget old entries that disappeared.
                 self._known_remotes = seen
+                await self._drain_geo_queue()
             except Exception as exc:
                 logger.debug("remotes poll failed: %s", exc)
             await asyncio.sleep(SECURITY_CONNECTIONS_INTERVAL)
