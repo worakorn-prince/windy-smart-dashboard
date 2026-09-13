@@ -19,7 +19,11 @@ def tmp_db(tmp_path, monkeypatch):
 def _seed(conn, start_ts, count, step=10):
     for i in range(count):
         conn.execute(
-            "INSERT OR REPLACE INTO samples VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO samples "
+            "(ts, cpu_pct, ram_pct, swap_pct, cpu_temp, gpu_temp, disk_temp_max, "
+            "cpu_power_w, gpu_power_w, net_sent_bps, net_recv_bps, "
+            "disk_read_bps, disk_write_bps) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (start_ts + i * step, 50 + (i % 10), 40, 5, 60, 55, 35, 1200, 30,
              1000, 2000, 300000, 400000),
         )
@@ -58,7 +62,11 @@ def test_unknown_range_falls_back_to_1h(tmp_db):
 def test_null_values_survive_roundtrip(tmp_db):
     conn = history._get_conn()
     conn.execute(
-        "INSERT OR REPLACE INTO samples VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO samples "
+        "(ts, cpu_pct, ram_pct, swap_pct, cpu_temp, gpu_temp, disk_temp_max, "
+        "cpu_power_w, gpu_power_w, net_sent_bps, net_recv_bps, "
+        "disk_read_bps, disk_write_bps) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (time.time(), 10, 20, 5, None, None, None, None, None, 0, 0, 0, 0),
     )
     conn.commit()

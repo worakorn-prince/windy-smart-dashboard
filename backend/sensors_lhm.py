@@ -63,6 +63,44 @@ def _resolve_lhm_dir() -> str:
     )
 
 
+def _normalize_type_name(raw: object) -> str:
+    """Normalize a SensorType value to a canonical name.
+
+    Tolerates .NET formatting variants: fully-qualified enum names
+    (``LibreHardwareMonitor.Hardware.SensorType.Temperature``), trailing
+    parens, stray whitespace and any casing. Unknown values fall back to
+    the stripped raw text so callers never crash on new sensor kinds.
+    """
+    text = str(raw or "").strip()
+    text = text.rsplit(".", maxsplit=1)[-1].strip()
+    text = text.strip("()[]{}").strip()
+    compact = (
+        text.lower().replace(" ", "").replace("_", "").replace("-", "")
+    )
+    canonical = {
+        "temperature": "Temperature",
+        "power": "Power",
+        "voltage": "Voltage",
+        "clock": "Clock",
+        "load": "Load",
+        "smalldata": "SmallData",
+        "data": "SmallData",
+        "fan": "Fan",
+        "flow": "Flow",
+        "control": "Control",
+        "level": "Level",
+        "current": "Current",
+        "throughput": "Throughput",
+        "timespan": "TimeSpan",
+        "energy": "Energy",
+        "noise": "Noise",
+        "humidity": "Humidity",
+    }
+    if compact in canonical:
+        return canonical[compact]
+    return text or "Unknown"
+
+
 def status_message() -> str:
     """Human-readable explanation of the current sensor init state."""
     state = _init_state
@@ -290,8 +328,7 @@ def read_all_sensors() -> list[dict[str, Any]]:
                         val = float(s.Value) if s.Value is not None else None
                     except (TypeError, ValueError):
                         val = None
-                    stype = str(s.SensorType)
-                    stype = stype.rsplit(".", maxsplit=1)[-1].rstrip(")")
+                    stype = _normalize_type_name(s.SensorType)
                     out.append({
                         "name": str(s.Name),
                         "type": stype,

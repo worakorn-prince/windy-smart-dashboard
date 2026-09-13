@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useMetricsStore } from '@/stores/metrics'
 
+const collapsed = ref(false)
 const store = useMetricsStore()
 
 const cpuW = computed(() => store.cpu?.power_watts ?? null)
@@ -28,8 +29,9 @@ const fmt = (v: number | null) => (v == null ? '—' : `${v.toFixed(1)} W`)
 
 <template>
   <div class="card power-card">
-    <h3>Power Usage</h3>
+    <h3>Power Usage <button data-testid="card-toggle" @click="collapsed = !collapsed">{{ collapsed ? '+' : '−' }}</button></h3>
 
+    <div v-show="!collapsed">
     <div v-if="totalW != null" class="total">
       <span class="total-value">{{ totalW.toFixed(1) }}</span>
       <span class="total-unit">W now</span>
@@ -49,6 +51,7 @@ const fmt = (v: number | null) => (v == null ? '—' : `${v.toFixed(1)} W`)
         <span class="label">{{ g.name }}</span>
         <span class="value">{{ fmt(g.w) }}</span>
       </div>
+    </div>
     </div>
   </div>
 </template>

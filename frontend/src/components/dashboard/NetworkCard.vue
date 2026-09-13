@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import type { NetworkSnapshot } from '@/stores/metrics'
+import { ref } from 'vue'
 import { formatBytes, formatRate } from '@/composables/format'
 
+const collapsed = ref(false)
 defineProps<{ network: NetworkSnapshot | null; ping: { latency_ms: number; target: string } }>()
 </script>
 
 <template>
   <div class="card">
-    <h3>Network</h3>
+    <h3>Network <button data-testid="card-toggle" @click="collapsed = !collapsed">{{ collapsed ? '+' : '−' }}</button></h3>
+    <div v-show="!collapsed">
     <div v-if="network">
       <!-- Upload/Download -->
       <div class="section">
@@ -78,6 +81,7 @@ defineProps<{ network: NetworkSnapshot | null; ping: { latency_ms: number; targe
       </div>
     </div>
     <p v-else class="muted">Waiting for data…</p>
+    </div>
   </div>
 </template>
 
@@ -124,7 +128,7 @@ function pingColor(ms: number) {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
-.info-row .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
+.info-row .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
 .info-row .value {
   font-size: 12px;
   font-weight: 500;
@@ -136,7 +140,7 @@ function pingColor(ms: number) {
   line-height: 1.4;
 }
 
-table { width: 100%; border-collapse: collapse; font-size: 11px; table-layout: fixed; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
 th, td {
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
@@ -144,15 +148,15 @@ th, td {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-th { color: var(--muted); font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
-td { font-size: 11px; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+td { font-size: 12px; }
 
 .kbd {
   font-family: 'JetBrains Mono', monospace;
   background: var(--panel-2);
   padding: 1px 6px;
   border-radius: 3px;
-  font-size: 11px;
+  font-size: 12px;
   display: inline-block;
   max-width: 100%;
   overflow-wrap: anywhere;

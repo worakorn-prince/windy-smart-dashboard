@@ -21,6 +21,7 @@ const BYTES_PER_MB = 1024 * 1024
 const SERIES_DEFS: SeriesDef[] = [
   { key: 'cpu_pct', label: 'CPU %', scale: '%', stroke: '#4fc3f7' },
   { key: 'ram_pct', label: 'RAM %', scale: '%', stroke: '#aed581' },
+  { key: 'swap_pct', label: 'Swap %', scale: '%', stroke: '#80deea' },
   { key: 'cpu_temp', label: 'CPU °C', scale: '°C', stroke: '#ff8a65' },
   { key: 'gpu_temp', label: 'GPU °C', scale: '°C', stroke: '#ba68c8' },
   { key: 'disk_temp_max', label: 'Disk °C', scale: '°C', stroke: '#ffb74d' },
@@ -34,11 +35,30 @@ const SERIES_DEFS: SeriesDef[] = [
 
 const RANGES: HistoryRange[] = ['1h', '6h', '24h']
 const STORAGE_KEY = 'history.enabled'
-// Default to 6 of 11 series (CPU/RAM + temps + power): keeps the chart
-// readable on first load; throughput series (net/disk MB/s) and disk temp
-// stay one click away via toggles to avoid scale clutter.
-const DEFAULT_ENABLED: SeriesKey[] = ['cpu_pct', 'ram_pct', 'cpu_temp', 'gpu_temp', 'cpu_power_w', 'gpu_power_w']
-const enabled = ref<SeriesKey[]>([...DEFAULT_ENABLED])
+const TAB_STORAGE_KEY = 'history.tab'
+
+type HistoryTab = 'cpu' | 'ram' | 'gpu' | 'network' | 'disk'
+
+interface TabDef {
+  id: HistoryTab
+  label: string
+  keys: SeriesKey[]
+}
+
+const TABS: TabDef[] = [
+  { id: 'cpu', label: 'CPU', keys: ['cpu_pct', 'cpu_temp', 'cpu_power_w'] },
+  { id: 'ram', label: 'RAM', keys: ['ram_pct', 'swap_pct'] },
+  { id: 'gpu', label: 'GPU', keys: ['gpu_temp', 'gpu_power_w'] },
+  { id: 'network', label: 'Network', keys: ['net_recv_bps', 'net_sent_bps'] },
+  { id: 'disk', label: 'Disk', keys: ['disk_read_bps', 'disk_write_bps', 'disk_temp_max'] },
+]
+
+function tabKeys(id: HistoryTab): SeriesKey[] {
+  return TABS.find(t => t.id === id)?.keys ?? TABS[0]!.keys
+}
+
+const activeTab = ref<HistoryTab>('cpu')
+const enabled = ref<SeriesKey[]>([...tabKeys('cpu')])
 
 const chartEl = ref<HTMLElement | null>(null)
 let uplot: uPlot | null = null
@@ -53,17 +73,45 @@ const hasThermalData = computed(() =>
   store.points.some(p => THERMAL_KEYS.some(k => p[k] != null)))
 const refreshing = computed(() => store.loading && store.points.length > 0)
 
+function loadTab(): void {
+  try {
+    const raw = localStorage.getItem(TAB_STORAGE_KEY)
+    if (TABS.some(t => t.id === raw)) activeTab.value = raw as HistoryTab
+  } catch { /* keep default tab on storage errors */ }
+}
+
 function loadEnabled(): void {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return
+    if (!raw) {
+      enabled.value = [...tabKeys(activeTab.value)]
+      return
+    }
     const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return
+    if (!Array.isArray(parsed)) {
+      enabled.value = [...tabKeys(activeTab.value)]
+      return
+    }
     const valid = parsed.filter((k): k is SeriesKey =>
       SERIES_DEFS.some(d => d.key === k))
-    if (valid.length) enabled.value = valid
-  } catch { /* keep defaults on corrupt storage */ }
+    enabled.value = valid.length ? valid : [...tabKeys(activeTab.value)]
+  } catch {
+    enabled.value = [...tabKeys(activeTab.value)]
+  }
 }
+
+function selectTab(id: HistoryTab) {
+  if (id === activeTab.value) return
+  activeTab.value = id
+  enabled.value = [...tabKeys(id)]
+  try { localStorage.setItem(TAB_STORAGE_KEY, id) } catch { /* storage unavailable */ }
+}
+
+function refreshChart(): void {
+  render()
+}
+
+const tabDefs = computed(() => SERIES_DEFS.filter(d => tabKeys(activeTab.value).includes(d.key)))
 
 function toggle(key: SeriesKey) {
   const i = enabled.value.indexOf(key)
@@ -119,7 +167,7 @@ function render() {
     stroke: cMuted,
     grid: { stroke: cBorder, width: 0.5 },
     ticks: { stroke: cBorder, width: 0.5 },
-    font: '10px ui-monospace, monospace',
+    font: '12px ui-monospace, monospace',
   }
 
   const opts: uPlot.Options = {
@@ -168,8 +216,10 @@ function scheduleRender() {
 
 onMounted(async () => {
   loadEnabled()
+  await loadTab()
   await store.load()
   render()
+  new MutationObserver(() => refreshChart()).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
   resizeObs = new ResizeObserver(() => {
     if (uplot && chartEl.value) {
       uplot.setSize({ width: chartEl.value.clientWidth || 600, height: 280 })
@@ -210,9 +260,17 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <div data-testid="history-tabs" class="tabs">
+      <button data-testid="history-tab-cpu" class="tab-btn" :class="{ active: activeTab === 'cpu' }" @click="selectTab('cpu')">CPU</button>
+      <button data-testid="history-tab-ram" class="tab-btn" :class="{ active: activeTab === 'ram' }" @click="selectTab('ram')">RAM</button>
+      <button data-testid="history-tab-gpu" class="tab-btn" :class="{ active: activeTab === 'gpu' }" @click="selectTab('gpu')">GPU</button>
+      <button data-testid="history-tab-network" class="tab-btn" :class="{ active: activeTab === 'network' }" @click="selectTab('network')">Network</button>
+      <button data-testid="history-tab-disk" class="tab-btn" :class="{ active: activeTab === 'disk' }" @click="selectTab('disk')">Disk</button>
+    </div>
+
     <div class="chips">
       <button
-        v-for="d in SERIES_DEFS"
+        v-for="d in tabDefs"
         :key="d.key"
         class="chip"
         :class="{ on: enabled.includes(d.key) }"
@@ -240,20 +298,26 @@ onBeforeUnmount(() => {
 .ranges { display: flex; gap: 6px; }
 .range-btn {
   background: transparent; color: var(--muted); border: 1px solid var(--border);
-  border-radius: 8px; padding: 4px 10px; font-size: 11px; cursor: pointer;
+  border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer;
 }
 .range-btn.active { color: var(--text); border-color: var(--accent); background: rgba(124,156,255,.12); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 12px; }
 .chip {
   background: transparent; border: 1px solid var(--border); color: var(--muted);
-  border-radius: 999px; padding: 3px 10px; font-size: 11px; cursor: pointer;
+  border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer;
 }
 .chip.on {
   color: var(--chip-color); border-color: var(--chip-color);
   background: color-mix(in srgb, var(--chip-color) 14%, transparent);
 }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 2px; }
+.tab-btn {
+  background: transparent; color: var(--muted); border: 1px solid var(--border);
+  border-radius: 8px; padding: 4px 12px; font-size: 12px; cursor: pointer;
+}
+.tab-btn.active { color: var(--text); border-color: var(--accent); background: rgba(124,156,255,.12); }
 .chart { min-width: 0; cursor: crosshair; }
 .hint { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
-.updating { color: var(--muted); font-size: 11px; font-weight: 400; }
+.updating { color: var(--muted); font-size: 12px; font-weight: 400; }
 .bad-text { color: var(--bad); }
 </style>

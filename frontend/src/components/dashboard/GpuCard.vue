@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { GpuSnapshot } from '@/stores/metrics'
-import { useMetricsStore } from '@/stores/metrics'
+import { useMetricsStore, severityOf, SEVERITY_COLORS } from '@/stores/metrics'
 import { computed } from 'vue'
 
 const props = defineProps<{ gpu: GpuSnapshot | null }>()
@@ -11,6 +11,15 @@ const noLiveSensors = computed(() => {
   if (!gpus.length) return false
   return gpus.every((g) => g.temperature_celsius == null && g.power_draw_watts == null)
 })
+
+const maxUsage = computed(() => {
+  const gpus = props.gpu?.gpus ?? []
+  const vals = gpus.map((g) => g.gpu_usage_percent ?? g.vram_usage_percent).filter((v): v is number => v != null)
+  if (!vals.length) return null
+  return Math.max(...vals)
+})
+const gpuSev = computed(() => severityOf('gpu', maxUsage.value))
+const gpuSevColor = computed(() => SEVERITY_COLORS[gpuSev.value])
 
 const tempColor = (v?: number) => {
   if (v == null) return ''
@@ -32,6 +41,10 @@ const vendorIcon = (v: string) => {
   <div class="card">
     <h3>GPU</h3>
     <div v-if="gpu && gpu.gpus.length > 0">
+      <div class="hero" data-testid="gpu-hero" :data-severity="gpuSev">
+        <span class="hero-value" data-testid="gpu-hero-value" :style="{ color: gpuSevColor }">{{ maxUsage != null ? maxUsage.toFixed(1) + '%' : 'N/A' }}</span>
+        <span class="hero-label">Max GPU Usage</span>
+      </div>
       <div v-for="(g, i) in gpu.gpus" :key="i" class="gpu-block">
         <div class="gpu-header">
           <span class="gpu-name" v-auto-tip>{{ vendorIcon(g.vendor) }} {{ g.name }}</span>
@@ -39,7 +52,7 @@ const vendorIcon = (v: string) => {
         </div>
 
         <!-- Real-time metrics (NVIDIA via nvidia-smi) -->
-        <div v-if="g.gpu_usage_percent !== undefined" class="usage-section">
+        <div v-if="g.gpu_usage_percent != null" class="usage-section">
           <div class="row small">
             <span class="label">Core Usage</span>
             <span class="value"><strong>{{ g.gpu_usage_percent }}%</strong></span>
@@ -99,6 +112,19 @@ const vendorIcon = (v: string) => {
 </template>
 
 <style scoped>
+.hero {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 2px 0 12px;
+}
+.hero-value {
+  font-size: 44px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.hero-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
 .gpu-block {
   padding: 10px;
   background: var(--panel-2);
@@ -125,7 +151,7 @@ const vendorIcon = (v: string) => {
 
 .info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
 .info-row { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
-.info-row .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
+.info-row .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
 .info-row .value { font-size: 12px; font-weight: 500; word-break: break-word; line-height: 1.4; }
 
 .text-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

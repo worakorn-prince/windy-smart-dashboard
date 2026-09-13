@@ -1,6 +1,21 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { RouterLink, RouterView } from 'vue-router'
 import AlertToasts from '@/components/AlertToasts.vue'
+
+const theme = ref<'dark' | 'light'>(localStorage.getItem('dash-theme') === 'light' ? 'light' : 'dark')
+
+function applyTheme() {
+  document.documentElement.dataset.theme = theme.value
+  localStorage.setItem('dash-theme', theme.value)
+}
+
+function toggleTheme() {
+  theme.value = theme.value === 'dark' ? 'light' : 'dark'
+  applyTheme()
+}
+
+applyTheme()
 </script>
 
 <template>
@@ -11,6 +26,7 @@ import AlertToasts from '@/components/AlertToasts.vue'
         <RouterLink to="/" active-class="active">Dashboard</RouterLink>
         <RouterLink to="/security" active-class="active">Security</RouterLink>
       </nav>
+      <button data-testid="theme-toggle" @click="toggleTheme" class="theme-toggle">{{ theme === 'dark' ? '☀️ สว่าง' : '🌙 มืด' }}</button>
     </header>
     <main class="content">
       <RouterView />
@@ -35,6 +51,25 @@ import AlertToasts from '@/components/AlertToasts.vue'
   --info: #6fd0ff;
 }
 
+:root[data-theme="light"] {
+  --bg: #f2f4f9;
+  --panel: #ffffff;
+  --panel-2: #e9edf5;
+  --border: #d5dbe8;
+  --text: #1a2233;
+  --muted: #5b6478;
+  --accent: #3557e8;
+  --good: #1f9d4d;
+  --warn: #9a6b00;
+  --bad: #d93636;
+  --crit: #c92a2a;
+  --info: #0284c7;
+}
+
+:root[data-theme="light"] .nav {
+  background: linear-gradient(180deg, #ffffff, #eef1f7);
+}
+
 * { box-sizing: border-box; }
 
 html, body, #app { height: 100%; margin: 0; }
@@ -53,7 +88,7 @@ body {
   align-items: center;
   gap: 16px;
   padding: 12px 20px;
-  background: linear-gradient(180deg, #14152a, #0f1020);
+  background: linear-gradient(180deg, var(--panel), var(--bg));
   border-bottom: 1px solid var(--border);
 }
 

@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import type { DiskSnapshot } from '@/stores/metrics'
 import { formatBytes, formatRate } from '@/composables/format'
 
 defineProps<{ disk: DiskSnapshot | null }>()
+
+const collapsed = ref(false)
 
 const color = (v: number) => (v > 90 ? 'var(--bad)' : v > 75 ? 'var(--warn)' : 'var(--accent)')
 const healthColor = (h: string) => {
@@ -34,7 +37,8 @@ function badgeTextColor(h: string) {
 
 <template>
   <div class="card">
-    <h3>Storage</h3>
+    <h3>Storage <button data-testid="card-toggle" @click="collapsed = !collapsed">{{ collapsed ? '+' : '−' }}</button></h3>
+    <div v-show="!collapsed">
     <div v-if="disk">
       <!-- Partitions -->
       <div class="section" v-if="disk.partitions.length > 0">
@@ -160,6 +164,7 @@ function badgeTextColor(h: string) {
       </div>
     </div>
     <p v-else class="muted">Waiting for data…</p>
+    </div>
   </div>
 </template>
 
@@ -168,23 +173,23 @@ function badgeTextColor(h: string) {
 .section h4 { margin: 0 0 8px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
 .info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-top: 8px; }
 .info-row { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
-.info-row .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
+.info-row .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
 .info-row .value { font-size: 12px; font-weight: 500; word-break: break-word; white-space: normal; line-height: 1.4; }
 
-table { width: 100%; border-collapse: collapse; font-size: 11px; table-layout: fixed; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
 th, td { padding: 6px 8px; border-bottom: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-th { color: var(--muted); font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
-td { font-size: 11px; }
-.monospace { font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+td { font-size: 12px; }
+.monospace { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
 
 .smart-detail { margin-bottom: 16px; background: var(--panel-2); border-radius: 8px; padding: 12px; }
 .smart-header { display: flex; justify-content: space-between; margin-bottom: 8px; font-weight: 600; }
-.smart-attrs table { font-size: 10px; }
-.smart-attrs th, .smart-attrs td { padding: 4px 6px; font-size: 10px; }
+.smart-attrs table { font-size: 12px; }
+.smart-attrs th, .smart-attrs td { padding: 4px 6px; font-size: 12px; }
 
 .temp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; margin-top: 8px; }
 .temp-item { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px; background: var(--panel-2); border-radius: 6px; min-width: 0; }
-.temp-label { font-size: 9px; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.temp-label { font-size: 12px; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .temp-value { font-size: 14px; font-weight: 700; }
 
 .text-sev-low { color: var(--good); }

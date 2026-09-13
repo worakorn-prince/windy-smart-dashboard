@@ -1,12 +1,15 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useMetricsStore } from '@/stores/metrics'
 
+const collapsed = ref(false)
 const store = useMetricsStore()
 </script>
 
 <template>
   <div class="card">
-    <h3>Internet Speed Test</h3>
+    <h3>Internet Speed Test <button data-testid="card-toggle" @click="collapsed = !collapsed">{{ collapsed ? '+' : '−' }}</button></h3>
+    <div v-show="!collapsed">
     <div v-if="store.speedtest" class="result">
       <div v-if="store.speedtest.ok">
         <div class="row">
@@ -39,6 +42,7 @@ const store = useMetricsStore()
     <button class="primary" :disabled="store.speedtestRunning" @click="store.runSpeedtest()">
       {{ store.speedtestRunning ? 'Running…' : 'Run Speed Test' }}
     </button>
+    </div>
   </div>
 </template>
 

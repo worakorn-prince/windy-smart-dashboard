@@ -209,6 +209,35 @@ export interface AlertItem {
   uid?: string
 }
 
+export type SeverityLevel = 'ok' | 'warn' | 'crit'
+export type SeverityKind = 'cpu' | 'ram' | 'temp' | 'gpu'
+
+export interface SeverityThreshold {
+  warn: number
+  crit: number
+}
+
+export const SEVERITY_THRESHOLDS: Record<SeverityKind, SeverityThreshold> = {
+  cpu: { warn: 75, crit: 90 },
+  ram: { warn: 85, crit: 95 },
+  temp: { warn: 75, crit: 85 },
+  gpu: { warn: 75, crit: 90 },
+}
+
+export function severityOf(kind: SeverityKind, value: number | null | undefined): SeverityLevel {
+  if (value === null || value === undefined || Number.isNaN(value)) return 'ok'
+  const t = SEVERITY_THRESHOLDS[kind]
+  if (value >= t.crit) return 'crit'
+  if (value >= t.warn) return 'warn'
+  return 'ok'
+}
+
+export const SEVERITY_COLORS: Record<SeverityLevel, string> = {
+  ok: '#5fd97c',
+  warn: '#ffd75f',
+  crit: '#ff6b6b',
+}
+
 export const useMetricsStore = defineStore('metrics', () => {
   const cpu = ref<CpuSnapshot | null>(null)
   const ram = ref<RamSnapshot | null>(null)
@@ -238,10 +267,18 @@ export const useMetricsStore = defineStore('metrics', () => {
 
   function handleMessage(data: any) {
     if (data.type === 'metrics') {
-      if (data.cpu) cpu.value = data.cpu
-      if (data.ram) ram.value = data.ram
-      if (data.disk) disk.value = data.disk
-      if (data.network) network.value = data.network
+      // Live ticks (live_snapshot) carry only a few scalars e.g. cpu:{overall},
+      // ram:{percent}. Shallow-merge over the previous snapshot so detail
+      // fields from the last full_snapshot (info/freq/temperature/details/...)
+      // survive; missing keys keep their old values, present keys overwrite.
+      if (data.cpu) cpu.value = { ...(cpu.value ?? {}), ...data.cpu } as CpuSnapshot
+      if (data.ram) ram.value = { ...(ram.value ?? {}), ...data.ram } as RamSnapshot
+      if (data.disk) {
+        const prevIo = (disk.value as any)?.io ?? {}
+        disk.value = { ...((disk.value ?? {}) as object), ...data.disk } as DiskSnapshot
+        if (data.disk.io) disk.value.io = { ...prevIo, ...data.disk.io }
+      }
+      if (data.network) network.value = { ...(network.value ?? {}), ...data.network } as NetworkSnapshot
       if (data.gpu) gpu.value = data.gpu
       if (data.ping) ping.value = data.ping
 

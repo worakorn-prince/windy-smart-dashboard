@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import platform
 import socket
 import subprocess
@@ -12,6 +13,8 @@ from datetime import datetime
 from typing import Any
 
 import psutil
+
+logger = logging.getLogger("dashboard.metrics")
 
 # Module-level state for delta calculations.
 _last_net_io = psutil.net_io_counters()
@@ -159,6 +162,49 @@ def cpu_snapshot() -> dict[str, Any]:
 _hw_sensors_cache: list[dict[str, Any]] | None = None
 _hw_sensors_ts: float = 0.0
 HW_SENSORS_TTL = 5.0  # seconds
+_lhm_diag_logged = False
+
+
+def _normalize_sensor_type(raw: object) -> str:
+    """Normalize a sensor type string for case/format-insensitive compare."""
+    text = str(raw or "").strip()
+    text = text.rsplit(".", maxsplit=1)[-1].strip()
+    text = text.strip("()[]{}").strip()
+    return text.lower().replace(" ", "").replace("_", "").replace("-", "")
+
+
+def _log_lhm_diagnostics_once(sensors: list[dict[str, Any]]) -> None:
+    """One-shot info log explaining an LHM-ok-but-empty reading situation."""
+    global _lhm_diag_logged
+    if _lhm_diag_logged:
+        return
+    _lhm_diag_logged = True
+    try:
+        import sensors_lhm
+
+        state = sensors_lhm.get_status().get("state", "?")
+    except Exception:
+        state = "?"
+    histogram: dict[str, int] = {}
+    for s in sensors:
+        key = _normalize_sensor_type(s.get("type", "")) or "unknown"
+        histogram[key] = histogram.get(key, 0) + 1
+    blob_hits = sum(
+        1
+        for s in sensors
+        if _normalize_sensor_type(s.get("type", "")) == "temperature"
+        and any(
+            k in (str(s.get("name", "")) + " " + str(s.get("parent", ""))).lower()
+            for k in ("cpu", "intelcpu", "amdcpu", "package", "tctl", "tdie")
+        )
+    )
+    logger.info(
+        "LHM diag: state=%s sensors=%d types=%s cpu_temp_candidates=%d",
+        state,
+        len(sensors),
+        histogram,
+        blob_hits,
+    )
 
 
 def _get_hw_sensors(ttl: float = HW_SENSORS_TTL) -> list[dict[str, Any]]:
@@ -179,6 +225,14 @@ def _get_hw_sensors(ttl: float = HW_SENSORS_TTL) -> list[dict[str, Any]]:
 
     if not sensors:
         sensors = _read_sensors_wmi()
+
+    try:
+        import sensors_lhm
+
+        if sensors_lhm.get_status().get("state") == "ok":
+            _log_lhm_diagnostics_once(sensors)
+    except Exception:
+        pass
 
     _hw_sensors_cache = sensors
     _hw_sensors_ts = now
@@ -244,12 +298,17 @@ def _read_sensors_wmi() -> list[dict[str, Any]]:
 
 def _filter_sensors(sensor_type: str, *keywords: str,
                     exclude: tuple = ()) -> list[dict[str, Any]]:
-    """Filter cached sensors by type + keyword match on name/parent."""
+    """Filter cached sensors by type + keyword match on name/parent/hwname."""
+    want = _normalize_sensor_type(sensor_type)
     hits = []
     for s in _get_hw_sensors():
-        if s["type"].lower() != sensor_type.lower():
+        if _normalize_sensor_type(s.get("type", "")) != want:
             continue
-        blob = (s["name"] + " " + s["parent"]).lower()
+        blob = (
+            str(s.get("name", "")) + " "
+            + str(s.get("parent", "")) + " "
+            + str(s.get("hwname", ""))
+        ).lower()
         if any(x.lower() in blob for x in exclude):
             continue
         if any(k.lower() in blob for k in keywords):
@@ -275,7 +334,9 @@ def _get_cpu_temperature() -> dict[str, Any] | None:
     """
     temps = _filter_sensors(
         "Temperature",
-        "cpu", "package", "tctl", "tdie", "core", "ccd", "socket", "proc ",
+        "cpu", "intelcpu", "amdcpu", "package", "tctl", "tdie", "core",
+        "ccd", "socket", "proc ",
+        exclude=("gpu",),
     )
     if not temps:
         return None
@@ -337,7 +398,10 @@ def _get_cpu_temperature_wmi() -> dict[str, Any] | None:
 
 def _get_cpu_power() -> float | None:
     """CPU package power draw in watts."""
-    return _sensor_value("Power", "cpu", "package", "tdie", exclude=("gpu",))
+    return _sensor_value(
+        "Power", "cpu", "intelcpu", "amdcpu", "package", "tdie",
+        exclude=("gpu",),
+    )
 
 
 # =============================================================================
@@ -677,26 +741,27 @@ def _get_gpu_sensors_lhm() -> dict[str, dict[str, Any]]:
         v = s["value"]
         if v is None:
             continue
-        if s["type"] == "Temperature":
+        stype = _normalize_sensor_type(s.get("type", ""))
+        if stype == "temperature":
             if "hot spot" in name_l or "hotspot" in name_l:
                 g["hotspot_temp"] = round(v, 1)
             else:
                 g["temperature_celsius"] = round(v, 1)
-        elif s["type"] == "Power":
+        elif stype == "power":
             g["power_draw_watts"] = round(v, 1)
-        elif s["type"] == "Clock":
+        elif stype == "clock":
             if "memory" in name_l:
                 g["memory_clock_mhz"] = round(v)
             elif "core" in name_l:
                 g["graphics_clock_mhz"] = round(v)
-        elif s["type"] == "Voltage":
+        elif stype == "voltage":
             g.setdefault("voltage", round(v, 2))
-        elif s["type"] == "Load":
+        elif stype == "load":
             # Canonical core-load sensor on AMD; NVIDIA exposes similar.
             if name_l.startswith("gpu core"):
                 g["gpu_usage_percent"] = round(
                     max(g.get("gpu_usage_percent") or 0, v), 1)
-        elif s["type"] == "SmallData":
+        elif stype == "smalldata":
             # VRAM sizes (MB). Ignore D3D shared-memory noise.
             if name_l == "gpu memory total":
                 g.setdefault("vram_total_mb", round(v))
@@ -903,12 +968,18 @@ def gpu_snapshot() -> dict[str, Any]:
             live = lhm.get(g.get("name", "").lower())
             if not live:
                 continue
+            n = g.get("name", "").lower()
+            is_igpu = ("vega" in n or "radeon(tm)" in n or
+                       g.get("vram_total_mb") in (512, 1024, 2048))
             for key in ("temperature_celsius", "hotspot_temp", "power_draw_watts",
                         "graphics_clock_mhz",
                         "memory_clock_mhz", "gpu_usage_percent"):
                 val = live.get(key)
-                if val is not None and not g.get(key):
-                    g[key] = val
+                if val is None or g.get(key):
+                    continue
+                if key == "gpu_usage_percent" and is_igpu and val >= 99.5:
+                    continue
+                g[key] = val
 
     # iGPUs (e.g. Vega) often expose no temperature of their own — fall back
     # to the CPU's GFX temperature sensor.
@@ -1034,9 +1105,10 @@ def sensors_status() -> dict[str, Any]:
     try:
         import sensors_lhm
 
+        status = sensors_lhm.get_status()
         return {
-            "state": sensors_lhm.init_state(),
-            "message": sensors_lhm.status_message(),
+            "state": status.get("state", "unknown"),
+            "message": status.get("message", "Hardware sensors status unknown."),
         }
     except Exception:
         return {"state": "no_pythonnet", "message": "sensors_lhm unavailable"}

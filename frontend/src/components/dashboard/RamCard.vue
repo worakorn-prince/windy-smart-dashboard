@@ -1,11 +1,27 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { RamSnapshot } from '@/stores/metrics'
+import { useMetricsStore, severityOf, SEVERITY_COLORS } from '@/stores/metrics'
 import { formatBytes } from '@/composables/format'
 
 const props = defineProps<{ ram: RamSnapshot | null; history: number[] }>()
+const store = useMetricsStore()
+const sensorState = computed(() => store.sensorStatus?.state ?? '')
+const sensorMsg = computed(() => store.sensorStatus?.message ?? '')
+const tempFallback = computed(() =>
+  sensorState.value === 'ok'
+    ? 'No temperature data reported for this hardware'
+    : (sensorMsg.value || 'Temperature unavailable (requires LibreHardwareMonitor + admin)'),
+)
+const voltageFallback = computed(() =>
+  sensorState.value === 'ok'
+    ? 'No voltage data reported for this hardware'
+    : (sensorMsg.value || 'Voltage data unavailable (requires LibreHardwareMonitor + admin)'),
+)
 
-const color = (v: number) => (v > 90 ? 'var(--bad)' : v > 75 ? 'var(--warn)' : 'var(--accent)')
+const color = (v: number) => SEVERITY_COLORS[severityOf('ram', v)]
+const ramSev = computed(() => severityOf('ram', props.ram?.percent))
+const ramSevColor = computed(() => SEVERITY_COLORS[ramSev.value])
 const used = computed(() => formatBytes(props.ram?.used ?? 0))
 const total = computed(() => formatBytes(props.ram?.total ?? 0))
 const available = computed(() => formatBytes(props.ram?.available ?? 0))
@@ -26,6 +42,10 @@ function tempClass(v: number) {
   <div class="card">
     <h3>Memory</h3>
     <div v-if="ram">
+      <div class="hero" data-testid="ram-hero" :data-severity="ramSev">
+        <span class="hero-value" data-testid="ram-hero-value" :style="{ color: ramSevColor }">{{ ram.percent.toFixed(1) }}%</span>
+        <span class="hero-label">Memory Usage</span>
+      </div>
       <div class="section">
         <div class="row">
           <span class="label">Usage</span>
@@ -111,7 +131,7 @@ function tempClass(v: number) {
           <span class="label">Max: {{ ram.temperature_celsius.max.toFixed(1) }}°C</span>
         </div>
       </div>
-      <div v-else class="muted small">Temperature unavailable (requires LibreHardwareMonitor + admin)</div>
+      <div v-else class="muted small">{{ tempFallback }}</div>
 
       <!-- Voltage -->
       <div class="section" v-if="ram.voltage != null">
@@ -121,7 +141,7 @@ function tempClass(v: number) {
           <span class="value">{{ ram.voltage.toFixed(3) }} V</span>
         </div>
       </div>
-      <div v-else class="muted small">Voltage data unavailable (requires LibreHardwareMonitor + admin)</div>
+      <div v-else class="muted small">{{ voltageFallback }}</div>
 
       <!-- Swap -->
       <div class="section" v-if="ram.swap_total > 0">
@@ -144,23 +164,36 @@ function tempClass(v: number) {
 </template>
 
 <style scoped>
+.hero {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 2px 0 12px;
+}
+.hero-value {
+  font-size: 44px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.hero-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
 .section { margin-bottom: 16px; }
 .section h4 { margin: 0 0 8px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
 .info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-top: 8px; }
 .info-row { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
-.info-row .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
+.info-row .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
 .info-row .value { font-size: 12px; font-weight: 500; word-break: break-word; white-space: normal; line-height: 1.4; }
 
 .modules-section { margin-top: 12px; }
 .modules-section h4 { margin: 0 0 8px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
-.modules-section table { font-size: 11px; }
-.modules-section th { color: var(--muted); font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px; }
+.modules-section table { font-size: 12px; }
+.modules-section th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.3px; }
 
 .temp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 8px; margin-top: 8px; }
 .temp-item { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px; background: var(--panel-2); border-radius: 6px; min-width: 0; }
-.temp-label { font-size: 9px; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.temp-label { font-size: 12px; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .temp-value { font-size: 14px; font-weight: 700; }
-.temp-summary { margin-top: 8px; font-size: 11px; color: var(--muted); }
+.temp-summary { margin-top: 8px; font-size: 12px; color: var(--muted); }
 
 .text-sev-low { color: var(--good); }
 .text-sev-medium { color: var(--warn); }

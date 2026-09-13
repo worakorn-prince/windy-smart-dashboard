@@ -1,14 +1,27 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { CpuSnapshot } from '@/stores/metrics'
-import { useMetricsStore } from '@/stores/metrics'
+import { useMetricsStore, severityOf, SEVERITY_COLORS } from '@/stores/metrics'
 import { formatNumber } from '@/composables/format'
 
 const props = defineProps<{ cpu: CpuSnapshot | null; history: number[] }>()
 const store = useMetricsStore()
+const sensorState = computed(() => store.sensorStatus?.state ?? '')
 const sensorMsg = computed(() => store.sensorStatus?.message ?? '')
+const tempFallback = computed(() =>
+  sensorState.value === 'ok'
+    ? 'No temperature data reported for this hardware'
+    : (sensorMsg.value || 'Temperature unavailable — run dashboard as Administrator (uses LibreHardwareMonitor)'),
+)
+const powerFallback = computed(() =>
+  sensorState.value === 'ok'
+    ? 'No power data reported for this hardware'
+    : (sensorMsg.value || 'Power data unavailable (requires LibreHardwareMonitor + admin)'),
+)
 
-const color = (v: number) => (v > 85 ? 'var(--bad)' : v > 60 ? 'var(--warn)' : 'var(--accent)')
+const color = (v: number) => SEVERITY_COLORS[severityOf('cpu', v)]
+const cpuSev = computed(() => severityOf('cpu', props.cpu?.overall))
+const cpuSevColor = computed(() => SEVERITY_COLORS[cpuSev.value])
 const freqColor = (v: number | null) => (v && v > 3500 ? 'var(--warn)' : v && v < 1000 ? 'var(--info)' : 'var(--good)')
 
 function tempClass(v: number) {
@@ -23,6 +36,10 @@ function tempClass(v: number) {
   <div class="card cpu-card">
     <h3>CPU</h3>
     <div v-if="cpu">
+      <div class="hero" data-testid="cpu-hero" :data-severity="cpuSev">
+        <span class="hero-value" data-testid="cpu-hero-value" :style="{ color: cpuSevColor }">{{ cpu.overall.toFixed(1) }}%</span>
+        <span class="hero-label">Overall Usage</span>
+      </div>
       <!-- Overall Usage -->
       <div class="section">
         <div class="row">
@@ -112,7 +129,7 @@ function tempClass(v: number) {
           <span class="label">Max: {{ cpu.temperature_celsius.max.toFixed(1) }}°C</span>
         </div>
       </div>
-      <div v-else class="muted small">{{ sensorMsg || 'Temperature unavailable — run dashboard as Administrator (uses LibreHardwareMonitor)' }}</div>
+      <div v-else class="muted small">{{ tempFallback }}</div>
 
       <!-- Power -->
       <div class="section" v-if="cpu.power_watts != null">
@@ -124,7 +141,7 @@ function tempClass(v: number) {
           </div>
         </div>
       </div>
-      <div v-else class="muted small">{{ sensorMsg || 'Power data unavailable (requires LibreHardwareMonitor + admin)' }}</div>
+      <div v-else class="muted small">{{ powerFallback }}</div>
 
     </div>
     <p v-else class="muted">Waiting for data…</p>
@@ -133,6 +150,19 @@ function tempClass(v: number) {
 
 <style scoped>
 .cpu-card { grid-column: span 2; }
+.hero {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 2px 0 12px;
+}
+.hero-value {
+  font-size: 44px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.hero-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
 .section { margin-bottom: 16px; }
 .section h4 { margin: 0 0 8px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
 .cores-grid {
@@ -153,17 +183,17 @@ function tempClass(v: number) {
   align-items: flex-end;
 }
 .core-bar > div { width: 100%; transition: height 0.4s ease; }
-.core-label { font-size: 10px; color: var(--muted); }
-.core-value { font-size: 11px; font-weight: 600; color: var(--text); }
+.core-label { font-size: 12px; color: var(--muted); }
+.core-value { font-size: 12px; font-weight: 600; color: var(--text); }
 
 .freq-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }
 .freq-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.freq-label { font-size: 10px; color: var(--muted); text-transform: uppercase; }
+.freq-label { font-size: 12px; color: var(--muted); text-transform: uppercase; }
 .freq-value { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
 
 .info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-top: 8px; }
 .info-row { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
-.info-row .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
+.info-row .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
 .info-row .value { font-size: 12px; font-weight: 500; word-break: break-word; white-space: normal; line-height: 1.4; }
 
 .temp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 8px; margin-top: 8px; }
@@ -174,11 +204,11 @@ function tempClass(v: number) {
   margin: 4px 0 10px;
 }
 .temp-primary-value { font-size: 30px; font-weight: 800; line-height: 1; }
-.temp-primary-label { font-size: 11px; color: var(--muted); }
+.temp-primary-label { font-size: 12px; color: var(--muted); }
 .temp-item { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px; background: var(--panel-2); border-radius: 6px; min-width: 0; }
-.temp-label { font-size: 9px; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.temp-label { font-size: 12px; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .temp-value { font-size: 14px; font-weight: 700; }
-.temp-summary { display: flex; justify-content: space-around; margin-top: 8px; font-size: 11px; color: var(--muted); }
+.temp-summary { display: flex; justify-content: space-around; margin-top: 8px; font-size: 12px; color: var(--muted); }
 
 .text-sev-low { color: var(--good); }
 .text-sev-medium { color: var(--warn); }

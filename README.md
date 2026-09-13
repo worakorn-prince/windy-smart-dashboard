@@ -88,6 +88,17 @@ Open **http://127.0.0.1:8000** in your browser.
   per-series toggles and multiple y-axes
 - **Live power usage** — a dedicated card shows current total wattage
   (CPU + GPU) plus a per-component and per-GPU breakdown
+- **Health strip** — a one-line summary bar (CPU / RAM / disk / top
+  temperatures) pinned at the top of the dashboard
+- **Dark / light mode** — header toggle, persisted in `localStorage`
+- **Tabbed history charts** — temperature / power / usage graphs split
+  into separate tabs instead of one crowded chart
+- **Collapsible cards** — every card can be expanded/collapsed to save space
+- **Sticky alerts** — active threshold breaches stay pinned at the top
+  while they last, plus the in-app toast stack
+- **Sensor-aware fallback** — cards render by sensor status; missing
+  readings (e.g. iGPU load, RAM temperature on boards without those
+  diodes) show `N/A` instead of stale or misleading values
 
 ### Security
 - **On-demand audit** — produces a risk-scored report with findings
@@ -138,8 +149,9 @@ Notes:
   show "Temperature unavailable".
 - `start-sensors.ps1` can launch/verify a standalone LibreHardwareMonitor
   instance if you prefer the GUI route.
-- AMD iGPU (Vega) has no own thermal diode reading here; the dashboard
-  falls back to the CPU's GFX temperature.
+- Boards without a given diode report `N/A`: a stuck iGPU load
+  (e.g. frozen at 100%) is filtered out, and RAM / iGPU temperatures
+  with no sensor data show `N/A` instead of a fallback value.
 
 ---
 

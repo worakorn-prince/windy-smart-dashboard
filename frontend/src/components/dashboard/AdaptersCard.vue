@@ -84,7 +84,7 @@ th, td {
   text-align: left;
 }
 th {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -111,7 +111,7 @@ tbody tr:hover { background: rgba(124, 156, 255, 0.05); }
 
 .mono {
   font-family: 'JetBrains Mono', Consolas, monospace;
-  font-size: 11.5px;
+  font-size: 12px;
   word-break: break-all;
 }
 .ip-line { line-height: 1.5; }

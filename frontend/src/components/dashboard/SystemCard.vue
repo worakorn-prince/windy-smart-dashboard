@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { SystemInfo } from '@/stores/metrics'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
+const collapsed = ref(false)
 const props = defineProps<{ system: SystemInfo | null }>()
 
 const battery = computed(() => props.system?.battery ?? null)
@@ -23,7 +24,8 @@ function fmtTimeRemaining(secs: number | null): string {
 
 <template>
   <div class="card">
-    <h3>System</h3>
+    <h3>System <button data-testid="card-toggle" @click="collapsed = !collapsed">{{ collapsed ? '+' : '−' }}</button></h3>
+    <div v-show="!collapsed">
     <div v-if="system">
       <div class="row small">
         <span class="label">Hostname</span>
@@ -76,6 +78,7 @@ function fmtTimeRemaining(secs: number | null): string {
       </div>
     </div>
     <p v-else class="muted">Waiting for data…</p>
+    </div>
   </div>
 </template>
 
