@@ -246,7 +246,7 @@ def test_history_db_stays_in_tmp_path(tmp_path):
 
     action_log.record("wu-scan", ok=True, duration_ms=1)
 
-    assert config.HISTORY_DB == tmp_path / "history.db"
+    assert tmp_path / "history.db" == config.HISTORY_DB
     assert config.HISTORY_DB.parent == tmp_path
     assert action_log.query(limit=1)[0]["action"] == "wu-scan"
 
@@ -371,7 +371,7 @@ def test_relaunch_stays_disabled():
     assert detail["code"] == "RELAUNCH_DISABLED"
     assert "run.ps1" in detail["hint"]
 
-    error_codes.NOT_IMPLEMENTED  # legacy constant still importable
+    assert error_codes.NOT_IMPLEMENTED is not None  # legacy constant still importable
 
 
 if __name__ == "__main__":

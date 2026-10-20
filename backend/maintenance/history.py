@@ -10,10 +10,11 @@ Logging failures must never break the action that is being logged.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +45,7 @@ _INDEX = (
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _db_path() -> Path:
@@ -111,10 +112,8 @@ def record(
         log.warning("maintenance history write failed (%s): %s", action, exc)
     finally:
         if conn is not None:
-            try:
+            with contextlib.suppress(Exception):
                 conn.close()
-            except Exception:
-                pass
 
 
 def query(limit: int = 100) -> list[dict[str, Any]]:
@@ -137,10 +136,8 @@ def query(limit: int = 100) -> list[dict[str, Any]]:
         return []
     finally:
         if conn is not None:
-            try:
+            with contextlib.suppress(Exception):
                 conn.close()
-            except Exception:
-                pass
 
     return [
         {
@@ -167,7 +164,7 @@ def purge(days: int = 30) -> int:
         return 0
 
     cutoff = (
-        datetime.now(timezone.utc) - timedelta(days=window)
+        datetime.now(UTC) - timedelta(days=window)
     ).isoformat(timespec="seconds").replace("+00:00", "Z")
 
     conn: sqlite3.Connection | None = None
@@ -181,7 +178,5 @@ def purge(days: int = 30) -> int:
         return 0
     finally:
         if conn is not None:
-            try:
+            with contextlib.suppress(Exception):
                 conn.close()
-            except Exception:
-                pass

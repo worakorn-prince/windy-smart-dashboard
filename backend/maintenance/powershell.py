@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from typing import Any
@@ -32,10 +33,8 @@ def _decode(data: bytes | None) -> str:
 
 
 def _kill(proc: Any) -> None:
-    try:
+    with contextlib.suppress(ProcessLookupError, OSError):
         proc.kill()
-    except (ProcessLookupError, OSError):
-        pass
 
 
 async def run_powershell(script: str, *, timeout: float = DEFAULT_TIMEOUT) -> str:
@@ -57,12 +56,10 @@ async def run_powershell(script: str, *, timeout: float = DEFAULT_TIMEOUT) -> st
 
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except (asyncio.TimeoutError, TimeoutError):
+    except TimeoutError:
         _kill(proc)
-        try:
+        with contextlib.suppress(ProcessLookupError, OSError):
             await proc.wait()
-        except (ProcessLookupError, OSError):
-            pass
         raise PowerShellTimeout(
             f"PowerShell query timed out after {timeout:g}s and was terminated"
         ) from None

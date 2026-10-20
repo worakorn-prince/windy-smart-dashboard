@@ -8,12 +8,12 @@ request is too risky — use `run.ps1` instead.
 from __future__ import annotations
 
 import inspect
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 
-from . import actions, cleaner, error_codes, export
+from . import actions, cleaner, export
 from . import history as action_log
 from .guards import require_allowed_host, require_csrf
 from .scanner import scan
@@ -60,7 +60,7 @@ _EXPORT_FORMATS = frozenset({"csv", "json"})
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _read_error(action: str, exc: Exception) -> HTTPException:
@@ -147,7 +147,7 @@ async def history_endpoint(limit: int = 100) -> dict[str, object]:
 
 
 @router.post("/action", dependencies=_WRITE_GUARDS)
-async def action(payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+async def action(payload: Annotated[dict[str, Any] | None, Body()] = None) -> dict[str, Any]:
     data = payload or {}
     try:
         return await actions.run_action(str(data.get("action") or ""))
@@ -166,7 +166,7 @@ async def clean_summary() -> dict[str, Any]:
 
 
 @router.post("/clean", dependencies=_WRITE_GUARDS)
-async def clean(payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+async def clean(payload: Annotated[dict[str, Any] | None, Body()] = None) -> dict[str, Any]:
     data = payload or {}
     targets = data.get("targets")
     if targets is None:
@@ -182,7 +182,7 @@ async def clean(payload: dict[str, Any] | None = Body(default=None)) -> dict[str
 
 @router.post("/export", dependencies=_WRITE_GUARDS)
 async def export_endpoint(
-    payload: dict[str, Any] | None = Body(default=None),
+    payload: Annotated[dict[str, Any] | None, Body()] = None,
 ) -> Response:
     data = payload or {}
     kind = str(data.get("kind") or "devices").strip().lower()

@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import platform
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from .powershell import (
@@ -68,7 +68,7 @@ def reset_cache() -> None:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _as_str(value: Any) -> str:

@@ -72,7 +72,7 @@ class ActionError(Exception):
 
 
 def _duration_ms(started: float) -> int:
-    return max(0, int(round((time.perf_counter() - started) * 1000)))
+    return max(0, round((time.perf_counter() - started) * 1000))
 
 
 def _first_json(raw: str) -> dict[str, Any]:

@@ -48,6 +48,5 @@ def require_allowed_host(request: Request) -> None:
 
 
 def require_csrf(request: Request) -> None:
-    if request.method.upper() in CSRF_METHODS:
-        if request.headers.get(CSRF_HEADER) != CSRF_VALUE:
-            raise HTTPException(status_code=403, detail=CSRF_FORBIDDEN_DETAIL)
+    if request.method.upper() in CSRF_METHODS and request.headers.get(CSRF_HEADER) != CSRF_VALUE:
+        raise HTTPException(status_code=403, detail=CSRF_FORBIDDEN_DETAIL)

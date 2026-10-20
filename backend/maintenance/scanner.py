@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import date, datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from . import error_codes
@@ -56,7 +56,7 @@ def reset_cache() -> None:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _as_str(value: Any) -> str:
@@ -79,11 +79,12 @@ def normalize_date(raw: Any) -> str:
         end = inner.find(")")
         digits = inner[:end] if end != -1 else inner
         try:
-            return date.fromtimestamp(int(digits) / 1000).isoformat()
+            # Legacy semantics kept: local-time date (matches old date.fromtimestamp call).
+            return datetime.fromtimestamp(int(digits) / 1000).date().isoformat()  # noqa: DTZ006
         except (ValueError, OSError, OverflowError):
             return ""
     try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00")).date().isoformat()
+        return datetime.fromisoformat(text).date().isoformat()
     except ValueError:
         return text[:10]
 

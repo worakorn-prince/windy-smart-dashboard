@@ -7,7 +7,7 @@ traversal surface.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 KINDS: tuple[str, ...] = ("devices", "history")
@@ -87,7 +87,7 @@ def build_csv(devices: list[dict[str, Any]]) -> str:
 
 
 def _filename(kind: str, fmt: str) -> str:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     return f"maintenance-{kind}-{stamp}.{fmt}"
 
 
