@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { ProcessInfo } from '@/stores/metrics'
 
-defineProps<{ processes: ProcessInfo[] }>()
+defineProps<{ processes: ProcessInfo[]; selectedPid?: number | null }>()
+const emit = defineEmits<{ select: [pid: number] }>()
 
 function truncateName(name: string, max = 22): string {
   if (!name) return ''
@@ -23,7 +24,16 @@ function truncateName(name: string, max = 22): string {
         </tr>
       </thead>
       <tbody>
-        <tr v-for="p in processes" :key="p.pid">
+        <tr
+          v-for="p in processes"
+          :key="p.pid"
+          class="clickable"
+          :class="{ selected: p.pid === selectedPid }"
+          tabindex="0"
+          @click="emit('select', p.pid)"
+          @keydown.enter="emit('select', p.pid)"
+          @keydown.space.prevent="emit('select', p.pid)"
+        >
           <td class="value">{{ p.pid }}</td>
           <td>{{ truncateName(p.name) }}</td>
           <td class="muted small" :title="p.user">{{ truncateName(p.user || '', 14) }}</td>
@@ -35,3 +45,10 @@ function truncateName(name: string, max = 22): string {
     <p v-else class="muted">Waiting for data…</p>
   </div>
 </template>
+
+<style scoped>
+tr.clickable { cursor: pointer; }
+tr.clickable:hover { background: rgba(124, 156, 255, 0.08); }
+tr.clickable:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+tr.selected { background: rgba(124, 156, 255, 0.16); }
+</style>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useMetricsStore } from '@/stores/metrics'
 import HealthStrip from '@/components/dashboard/HealthStrip.vue'
 import AlertsCard from '@/components/dashboard/AlertsCard.vue'
@@ -13,10 +13,12 @@ import HistoryCard from '@/components/dashboard/HistoryCard.vue'
 import NetworkCard from '@/components/dashboard/NetworkCard.vue'
 import AdaptersCard from '@/components/dashboard/AdaptersCard.vue'
 import ProcessesCard from '@/components/dashboard/ProcessesCard.vue'
+import ProcessDetailPanel from '@/components/dashboard/ProcessDetailPanel.vue'
 import SystemCard from '@/components/dashboard/SystemCard.vue'
 import SpeedtestCard from '@/components/dashboard/SpeedtestCard.vue'
 
 const store = useMetricsStore()
+const selectedPid = ref<number | null>(null)
 
 onMounted(() => {
   store.connect()
@@ -44,9 +46,14 @@ onMounted(() => {
     </div>
     <div class="grid wide">
       <HistoryCard />
-      <ProcessesCard :processes="store.processes" />
+      <ProcessesCard
+        :processes="store.processes"
+        :selected-pid="selectedPid"
+        @select="selectedPid = $event"
+      />
       <AdaptersCard :adapters="store.network?.adapters" />
     </div>
+    <ProcessDetailPanel :pid="selectedPid" @close="selectedPid = null" />
   </div>
 </template>
 

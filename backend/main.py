@@ -18,6 +18,8 @@ Endpoints:
   GET /api/security/blocked          — list block rules
   GET /api/security/events           — persisted security event history (admin)
   POST /api/security/export          — {fmt: pdf|html|json} -> returns file
+  GET /api/processes/{pid}           — process detail + parent/child tree + ports
+  GET /api/processes/{pid}/history   — per-process CPU/RAM samples (newest last)
 """
 from __future__ import annotations
 
@@ -27,11 +29,15 @@ import ipaddress
 import json
 import logging
 import re
+import socket
+import threading
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
+import psutil
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,6 +48,7 @@ import config
 import history
 from maintenance.router import router as maintenance_router
 import metrics
+import process_history
 import speedtest_worker
 from alerts import (
     evaluate as evaluate_alerts,
@@ -91,6 +98,12 @@ class ConnectionManager:
 manager = ConnectionManager()
 sec_mon: sec_monitor.SecurityMonitor | None = None
 suspicious_countries_state: list[str] = list(config.DEFAULT_SUSPICIOUS_COUNTRIES)
+
+# Cached net_connections() rows — the process drilldown joins ports from this
+# scan instead of re-enumerating every socket on each request.
+_NET_CACHE_TTL = 5.0
+_net_cache_lock = threading.Lock()
+_net_cache: tuple[float, list[dict[str, Any]]] | None = None
 
 
 def security_event_payload(evt: sec_monitor.Event) -> dict[str, Any]:
@@ -166,6 +179,7 @@ async def lifespan(app: FastAPI):
             t.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await t
+        process_history.close()
 
 
 app = FastAPI(title="Windy Smart Dashboard", lifespan=lifespan)
@@ -243,6 +257,146 @@ async def _process_loop() -> None:
         await asyncio.sleep(PROCESS_INTERVAL)
 
 
+def _collect_process_samples(top_n: int = 20) -> list[dict[str, Any]]:
+    """Return the top-N processes by RSS for the process history table."""
+    procs: list[dict[str, Any]] = []
+    for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info"]):
+        try:
+            info = p.info
+            mem = info.get("memory_info")
+            rss = getattr(mem, "rss", 0) or 0
+            procs.append({
+                "pid": info["pid"],
+                "name": info.get("name") or "",
+                "cpu_pct": round(info.get("cpu_percent") or 0.0, 1),
+                "mem_mb": round(rss / (1024 * 1024), 2),
+            })
+        except Exception:
+            continue
+    procs.sort(key=lambda x: x["mem_mb"], reverse=True)
+    return procs[:top_n]
+
+
+def _net_connection_rows() -> list[dict[str, Any]]:
+    """Return cached inet socket rows (TTL ~5s) for ports/connections joins."""
+    global _net_cache
+    now = time.monotonic()
+    cached = _net_cache
+    if cached is not None and now - cached[0] < _NET_CACHE_TTL:
+        return cached[1]
+
+    rows: list[dict[str, Any]] = []
+    try:
+        for c in psutil.net_connections(kind="inet"):
+            laddr = c.laddr
+            rows.append({
+                "pid": c.pid or 0,
+                "status": c.status or "",
+                "laddr": [laddr.ip, laddr.port] if laddr else None,
+                "type": getattr(c, "type", None),
+            })
+    except Exception:
+        logger.exception("net_connections scan failed")
+        rows = []
+
+    with _net_cache_lock:
+        _net_cache = (now, rows)
+    return rows
+
+
+def _protocol_name(sock_type: Any) -> str:
+    if sock_type == socket.SOCK_STREAM:
+        return "tcp"
+    if sock_type == socket.SOCK_DGRAM:
+        return "udp"
+    return "other"
+
+
+def _process_net_info(pid: int) -> tuple[list[dict[str, Any]], int]:
+    """Join listening ports and established-connection count for ``pid``."""
+    ports: list[dict[str, Any]] = []
+    seen: set[tuple[int, str, str]] = set()
+    connections = 0
+    for row in _net_connection_rows():
+        if row.get("pid") != pid:
+            continue
+        status = str(row.get("status") or "")
+        if status == "ESTABLISHED":
+            connections += 1
+        if status != "LISTEN":
+            continue
+        laddr = row.get("laddr")
+        if not laddr:
+            continue
+        port = int(laddr[1])
+        protocol = _protocol_name(row.get("type"))
+        key = (port, protocol, status)
+        if key in seen:
+            continue
+        seen.add(key)
+        ports.append({"port": port, "protocol": protocol, "state": status})
+    ports.sort(key=lambda p: p["port"])
+    return ports, connections
+
+
+def _safe_attr(fn: Any, default: Any) -> Any:
+    """Call a psutil accessor, falling back to ``default`` on access errors."""
+    try:
+        return fn()
+    except Exception:
+        return default
+
+
+def _process_tree(proc: Any, depth: int) -> dict[str, Any]:
+    node: dict[str, Any] = {
+        "pid": proc.pid,
+        "name": _safe_attr(proc.name, "") or "",
+        "children": [],
+    }
+    if depth > 0:
+        node["children"] = _child_nodes(proc, depth)
+    return node
+
+
+def _child_nodes(proc: Any, depth: int) -> list[dict[str, Any]]:
+    children = _safe_attr(proc.children, []) or []
+    return [_process_tree(child, depth - 1) for child in children]
+
+
+def _process_detail(pid: int) -> dict[str, Any]:
+    """Build the process drilldown payload (raises 404 for unknown pids)."""
+    try:
+        proc = psutil.Process(pid)
+    except (psutil.NoSuchProcess, psutil.AccessDenied) as exc:
+        raise HTTPException(status_code=404, detail="process_not_found") from exc
+
+    mem = _safe_attr(proc.memory_info, None)
+    rss = getattr(mem, "rss", 0) or 0
+    parent_proc = _safe_attr(proc.parent, None)
+    parent = None
+    if parent_proc is not None:
+        parent = {"pid": parent_proc.pid, "name": _safe_attr(parent_proc.name, "") or ""}
+
+    ports, connections = _process_net_info(pid)
+
+    return {
+        "pid": pid,
+        "name": _safe_attr(proc.name, "") or "",
+        "exe": _safe_attr(proc.exe, "") or "",
+        "cmdline": _safe_attr(proc.cmdline, []) or [],
+        "username": _safe_attr(proc.username, "") or "",
+        "status": _safe_attr(proc.status, "unknown") or "unknown",
+        "create_time": _safe_attr(proc.create_time, None),
+        "cpu_pct": round(_safe_attr(lambda: proc.cpu_percent(interval=None), 0.0) or 0.0, 1),
+        "mem_mb": round(rss / (1024 * 1024), 2),
+        "mem_pct": round(_safe_attr(proc.memory_percent, 0.0) or 0.0, 2),
+        "parent": parent,
+        "children": _child_nodes(proc, 3),
+        "ports": ports,
+        "connections_count": connections,
+    }
+
+
 async def _uptime_loop() -> None:
     """Push uptime refresh every UPTIME_INTERVAL seconds."""
     while True:
@@ -257,10 +411,15 @@ async def _uptime_loop() -> None:
 
 
 async def _history_loop() -> None:
-    """Persist one metrics sample every HISTORY_SAMPLE_INTERVAL seconds."""
+    """Persist one metrics sample plus top-20 process samples per interval."""
     while True:
         try:
             sample = await asyncio.to_thread(history.record_sample)
+            try:
+                procs = await asyncio.to_thread(_collect_process_samples)
+                await asyncio.to_thread(process_history.record_samples, procs)
+            except Exception:
+                logger.exception("process history sampling failed")
             fired = await asyncio.to_thread(evaluate_alerts, sample)
             toast_enabled = get_alert_channels().get("toast", True)
             for a in fired:
@@ -332,6 +491,21 @@ async def api_sensors_status() -> dict[str, Any]:
 async def api_history(rng: Literal["1h", "6h", "24h"] = Query(default="1h", alias="range")) -> dict[str, Any]:
     """Return bucketed metrics history, rejecting unknown ranges with 422."""
     return await asyncio.to_thread(history.query_range, rng)
+
+
+@app.get("/api/processes/{pid}")
+async def api_process_detail(pid: int) -> dict[str, Any]:
+    """Process drilldown: core info, 3-level parent/child tree, ports."""
+    return await asyncio.to_thread(_process_detail, pid)
+
+
+@app.get("/api/processes/{pid}/history")
+async def api_process_history(
+    pid: int,
+    limit: int = Query(default=60, ge=1, le=240),
+) -> list[dict[str, Any]]:
+    """CPU/RAM samples for one process, oldest first (newest last)."""
+    return await asyncio.to_thread(process_history.get_history, pid, limit)
 
 
 @app.post("/api/speedtest")
