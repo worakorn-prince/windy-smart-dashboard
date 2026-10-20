@@ -17,11 +17,12 @@ th, td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; font-size: 
 .notice { background: #fff3cd; border: 1px solid #e0c36a; padding: 8px 12px; border-radius: 8px; margin: 8px 0; }
 .error { background: #fdecea; border: 1px solid #e0a39a; padding: 8px 12px; border-radius: 8px; margin: 8px 0; }
 .muted { color: #666; font-size: 0.85em; }
+.live-badge { display: inline-block; background: #16a34a; color: #fff; font-size: 0.7em; font-weight: 700; letter-spacing: 1px; padding: 2px 8px; border-radius: 999px; vertical-align: middle; margin-left: 8px; }
 @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
-<h1>Agent Dashboard</h1>
+<h1>Agent Dashboard<span id="live-indicator" class="live-badge" hidden>LIVE</span></h1>
 <p class="muted">Static viewer — double-click to open, or run <code>python -m http.server</code> then open <code>dashboard/index.html</code> · Source: <code>dashboard/data.json</code> (built by <code>scripts/export_json.py</code>)</p>
 <div id="load-error" class="error" hidden></div>
 <div id="cdn-warning" class="notice" hidden></div>
@@ -141,7 +142,16 @@ function esc(v) {
     .replace(/'/g, "&#39;");
 }
 
-async function main() {
+const charts = {};
+function makeChart(id, cfg) {
+  if (typeof Chart === "undefined") return;
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (charts[id] && typeof charts[id].destroy === "function") charts[id].destroy();
+  charts[id] = new Chart(el, cfg);
+}
+
+async function refresh() {
   let data;
   try {
     const res = await fetch("data.json", { cache: "no-store" });
@@ -151,7 +161,7 @@ async function main() {
     const el = document.getElementById("load-error");
     el.hidden = false;
     el.textContent = "Could not load data.json (" + err.message + ") — run python scripts/export_json.py from the repo root, then refresh";
-    return;
+    return false;
   }
   renderKpis(data);
   renderTable(data);
@@ -161,9 +171,25 @@ async function main() {
     const w = document.getElementById("cdn-warning");
     w.hidden = false;
     w.textContent = "Offline: could not load Chart.js from CDN — showing numeric tables instead (tables below still work)";
-    return;
+    return true;
   }
   renderCharts(data);
+  return true;
+}
+
+const autoParams = new URLSearchParams(location.search);
+const AUTO = autoParams.has("auto") && autoParams.get("auto") !== "0";
+const AUTO_MS = 5000;
+
+function startAuto() {
+  const badge = document.getElementById("live-indicator");
+  if (badge) badge.hidden = false;
+  setInterval(refresh, AUTO_MS);
+}
+
+async function main() {
+  await refresh();
+  if (AUTO) startAuto();
 }
 
 function renderKpis(data) {
@@ -262,11 +288,15 @@ function renderExtra(data) {
     "<tr><td>" + esc(r.task) + "</td><td>" + esc(r.time) + "</td><td>" + esc(r.status) + "</td><td>" + esc(r.severity) +
     "</td><td>" + esc(r.file || "") + "</td><td>" + esc(r.issue || "") + "</td></tr>"));
   const cap = document.querySelector("#tbl-find");
-  if (cap && !document.getElementById("find-sum")) {
+  const sumEl = document.getElementById("find-sum");
+  const sumText = "total critical=" + (sev.critical || 0) + " major=" + (sev.major || 0) + " minor=" + (sev.minor || 0);
+  if (cap && !sumEl) {
     const p = document.createElement("p");
     p.id = "find-sum"; p.className = "muted";
-    p.textContent = "total critical=" + (sev.critical || 0) + " major=" + (sev.major || 0) + " minor=" + (sev.minor || 0);
+    p.textContent = sumText;
     cap.after(p);
+  } else if (sumEl) {
+    sumEl.textContent = sumText;
   }
   tb("tbl-tools", ((data.tools || {}).matrix || []).map(m =>
     "<tr><td>" + esc(m.tool) + "</td><td>" + esc(m.category) + "</td><td>" + esc(m.calls) + "</td><td>" + esc(m.errors) +
@@ -297,30 +327,28 @@ function renderExtra(data) {
     "</td><td>" + esc(a.avg_tokens === null || a.avg_tokens === undefined ? "-" : Math.round(a.avg_tokens)) +
     "</td><td>" + esc(fmtv(a.avg_tools)) + "</td><td>" + esc(fmtv(a.avg_time_s)) +
     "</td><td>" + esc(fmtv(a.recovery_rate)) + "</td><td>" + (a.low_sample ? "LOW" : "ok") + "</td></tr>"));
-  if (typeof Chart !== "undefined") {
-    const tr = data.trend || [];
-    new Chart(document.getElementById("ch-trend"), {
-      type: "line",
-      data: { labels: tr.map(t => t.date), datasets: [
-        { label: "done", data: tr.map(t => t.done) },
-        { label: "tool_calls", data: tr.map(t => t.tool_calls) }
-      ] },
-      options: { responsive: true }
-    });
-  }
+  const tr = data.trend || [];
+  makeChart("ch-trend", {
+    type: "line",
+    data: { labels: tr.map(t => t.date), datasets: [
+      { label: "done", data: tr.map(t => t.done) },
+      { label: "tool_calls", data: tr.map(t => t.tool_calls) }
+    ] },
+    options: { responsive: true }
+  });
 }
 
 function renderCharts(data) {
   const rows = data.per_task || [];
   const labels = rows.map(r => r.task);
-  new Chart(document.getElementById("ch-calls"), {
+  makeChart("ch-calls", {
     type: "bar",
     data: { labels, datasets: [{ label: "tool_calls", data: rows.map(r => r.tool_calls) }] },
     options: { responsive: true }
   });
 
   const tl = (data.timeline || []).slice().sort((a, b) => String(a.time).localeCompare(String(b.time)));
-  new Chart(document.getElementById("ch-timeline"), {
+  makeChart("ch-timeline", {
     type: "line",
     data: { labels: tl.map((_, i) => i + 1), datasets: [{ label: "cumulative events", data: tl.map((_, i) => i + 1) }] },
     options: { responsive: true }
@@ -330,13 +358,13 @@ function renderCharts(data) {
   const done = k.done || 0;
   const failed = k.failed || 0;
   const pending = Math.max((k.total_tasks || 0) - done - failed - (k.cancelled || 0), 0);
-  new Chart(document.getElementById("ch-pie"), {
+  makeChart("ch-pie", {
     type: "pie",
     data: { labels: ["done", "pending", "failed"], datasets: [{ data: [done, pending, failed] }] },
     options: { responsive: true }
   });
 
-  new Chart(document.getElementById("ch-multi"), {
+  makeChart("ch-multi", {
     type: "bar",
     data: { labels, datasets: [
       { label: "sessions", data: rows.map(r => r.sessions) },

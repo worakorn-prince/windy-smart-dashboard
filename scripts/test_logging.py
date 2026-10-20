@@ -16,6 +16,7 @@ import metrics as metrics_mod
 import export_json as export_mod
 import aggregate as aggregate_mod
 import tools_inventory as tools_mod
+import watch as watch_mod
 
 
 REQUIRED_TOOLCALL_FIELDS = {
@@ -690,6 +691,62 @@ class TestLoggingIsolated(unittest.TestCase):
                     "peak_mb", "export_kb", "tasks"):
             self.assertIn(key, row)
         self.assertGreater(row["tasks"], 0)
+
+
+class TestWatch(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = os.path.join(self.tmp.name, "proj")
+        self.mgr = os.path.join(self.root, ".agent", "manager")
+        os.makedirs(self.mgr)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _write(self, name, rows):
+        with open(os.path.join(self.mgr, name), "w", encoding="utf-8") as f:
+            for r in rows:
+                f.write(json.dumps(r) + "\n")
+
+    def test_watch_should_rebuild_decision(self):
+        self.assertTrue(watch_mod.should_rebuild(None, {}))
+        prev = {"a.jsonl": (100.0, 10)}
+        self.assertFalse(watch_mod.should_rebuild(prev, {"a.jsonl": (100.0, 10)}))
+        self.assertTrue(watch_mod.should_rebuild(prev, {"a.jsonl": (200.0, 10)}))
+        self.assertTrue(watch_mod.should_rebuild(prev, {"a.jsonl": (100.0, 20)}))
+        self.assertTrue(watch_mod.should_rebuild(
+            prev, {"a.jsonl": (100.0, 10), "b.jsonl": (1.0, 1)}))
+        self.assertTrue(watch_mod.should_rebuild(
+            {"a.jsonl": (100.0, 10), "b.jsonl": (1.0, 1)}, prev))
+
+    def test_watch_snapshot_and_cycle(self):
+        self.assertEqual(watch_mod.snapshot(self.root), {})
+        self._write("events.jsonl", [
+            {"time": "2026-09-14T07:00:00Z", "event": "TASK_CREATED", "task": "TASK-W1"},
+            {"time": "2026-09-14T08:00:00Z", "event": "TASK_DONE", "task": "TASK-W1"},
+        ])
+        self._write("tool-calls.jsonl", [
+            {"task": "TASK-W1", "operation": "CALL", "tokens_in": 5, "tokens_out": 5},
+        ])
+        snap = watch_mod.snapshot(self.root)
+        self.assertEqual(len(snap), 2)
+        prev, changed = watch_mod.cycle(self.root, None)
+        self.assertTrue(changed)
+        out = os.path.join(self.root, "dashboard", "data.json")
+        self.assertTrue(os.path.exists(out))
+        with open(out, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertEqual(data["kpis"]["total_tasks"], 1)
+        self.assertEqual(data["kpis"]["done"], 1)
+        _, unchanged = watch_mod.cycle(self.root, prev)
+        self.assertFalse(unchanged)
+        self._write("events.jsonl", [
+            {"time": "2026-09-14T07:00:00Z", "event": "TASK_CREATED", "task": "TASK-W1"},
+            {"time": "2026-09-14T08:00:00Z", "event": "TASK_DONE", "task": "TASK-W1"},
+            {"time": "2026-09-14T09:00:00Z", "event": "TASK_CREATED", "task": "TASK-W2"},
+        ])
+        _, changed2 = watch_mod.cycle(self.root, prev)
+        self.assertTrue(changed2)
 
 
 if __name__ == "__main__":
