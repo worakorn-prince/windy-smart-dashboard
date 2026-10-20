@@ -7,11 +7,14 @@ their rate timestamps.
 """
 from __future__ import annotations
 
+import argparse
 import contextlib
 import logging
+import os
 import sqlite3
 import threading
 import time
+from pathlib import Path
 from typing import Any, Literal
 
 import psutil
@@ -55,6 +58,16 @@ _prev_disk = psutil.disk_io_counters()
 _prev_ts = time.monotonic()
 _last_cleanup = 0.0
 _last_sample_ts = 0.0
+_last_prune_day: int | None = None
+
+
+def _retention_days() -> float:
+    raw = os.environ.get("DASH_HISTORY_DAYS", "30")
+    try:
+        days = float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        days = 30.0
+    return max(days, 0.0)
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -170,7 +183,33 @@ def record_sample() -> dict[str, Any]:
             with contextlib.suppress(sqlite3.Error):
                 _get_conn().execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
+    _maybe_auto_prune()
+
     return s
+
+
+def prune(days: float = 30) -> int:
+    """Delete samples older than `days` days; return the number of rows removed."""
+    days = max(float(days), 0.0)
+    cutoff = time.time() - days * 86400.0
+    with _lock:
+        conn = _get_conn()
+        deleted = conn.execute("DELETE FROM samples WHERE ts < ?", (cutoff,)).rowcount
+        conn.commit()
+        with contextlib.suppress(sqlite3.Error):
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    return max(deleted, 0)
+
+
+def _maybe_auto_prune(now_ts: float | None = None) -> int:
+    """Prune once per calendar day (UTC day index), driven by DASH_HISTORY_DAYS."""
+    global _last_prune_day
+    ts = time.time() if now_ts is None else now_ts
+    day = int(ts // 86400)
+    if day == _last_prune_day:
+        return 0
+    _last_prune_day = day
+    return prune(_retention_days())
 
 
 def query_range(range_str: HistoryRange = "1h") -> dict[str, Any]:
@@ -201,3 +240,28 @@ def query_range(range_str: HistoryRange = "1h") -> dict[str, Any]:
 
     return {"range": range_str, "bucket_sec": bucket,
             "count": len(points), "points": points}
+
+
+def _main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="backend/history.py",
+        description="Persistent metrics history (SQLite) maintenance CLI")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    p_prune = sub.add_parser("prune", help="ลบแถว samples ที่เก่ากว่า N วัน")
+    p_prune.add_argument("--days", type=float, default=30.0,
+                         help="อายุขั้นต่ำของแถวที่จะลบ เป็นวัน (default: 30)")
+    p_prune.add_argument("--db", default=None,
+                         help="path ของไฟล์ SQLite (default: ใช้ config.HISTORY_DB)")
+    args = parser.parse_args(argv)
+
+    if args.cmd == "prune":
+        if args.db:
+            config.HISTORY_DB = Path(args.db)
+        deleted = prune(args.days)
+        print(f"pruned {deleted} row(s) older than {args.days:g} day(s) "
+              f"from {config.HISTORY_DB}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())
