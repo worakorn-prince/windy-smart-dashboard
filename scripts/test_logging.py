@@ -4,6 +4,8 @@ import os
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -17,6 +19,7 @@ import export_json as export_mod
 import aggregate as aggregate_mod
 import tools_inventory as tools_mod
 import watch as watch_mod
+import compare as compare_mod
 
 
 REQUIRED_TOOLCALL_FIELDS = {
@@ -747,6 +750,182 @@ class TestWatch(unittest.TestCase):
         ])
         _, changed2 = watch_mod.cycle(self.root, prev)
         self.assertTrue(changed2)
+
+
+class TestCompare(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _payload(tasks, done, failed, calls, tokens, success_rate=None,
+                 times=None, denied=0):
+        if success_rate is None:
+            terminal = done + failed
+            success_rate = (done / terminal) if terminal else 0.0
+        per_task = {}
+        for i in range(tasks):
+            per_task[f"TASK-{i}"] = {
+                "time_to_DONE": times[i] if times else None,
+                "done": i < done,
+                "tool_calls_per_task": (calls / tasks) if tasks else 0,
+                "tokens_total": (tokens / tasks) if tasks else 0,
+                "denied_attempts": denied if i == 0 else 0,
+            }
+        totals = {"tasks": tasks, "done": done, "failed": failed,
+                  "cancelled": 0, "success_rate": success_rate,
+                  "tool_calls": calls, "tokens_total": tokens,
+                  "denied_attempts": denied}
+        return {"totals": totals, "per_task": per_task}
+
+    def _write_dataset(self, name, payload):
+        root = os.path.join(self.tmp.name, name)
+        mgr = os.path.join(root, ".agent", "manager")
+        os.makedirs(mgr)
+        with open(os.path.join(mgr, "metrics.json"), "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        return root
+
+    def _run_json(self, base, cand):
+        out = StringIO()
+        with redirect_stdout(out):
+            code = compare_mod.main(["--base", base, "--cand", cand, "--json"])
+        return code, json.loads(out.getvalue())
+
+    def test_compare_delta_calculation(self):
+        base = self._payload(4, 4, 0, 100, 10000,
+                             times=[100.0, 200.0, 300.0, 400.0])
+        cand = self._payload(4, 3, 1, 112, 11000,
+                             times=[100.0, 200.0, 300.0, None])
+        result = compare_mod.compare_datasets(base, cand)
+        rows = {r["metric"]: r for r in result["metrics"]}
+        self.assertEqual(rows["total_tasks"]["base"], 4)
+        self.assertEqual(rows["total_tasks"]["delta"], 0)
+        self.assertAlmostEqual(rows["done_rate_pct"]["base"], 100.0)
+        self.assertAlmostEqual(rows["done_rate_pct"]["cand"], 75.0)
+        self.assertAlmostEqual(rows["done_rate_pct"]["delta"], -25.0)
+        self.assertAlmostEqual(rows["tool_calls"]["delta_pct"], 12.0)
+        self.assertAlmostEqual(rows["tokens_total"]["delta_pct"], 10.0)
+        self.assertAlmostEqual(rows["avg_tool_calls_per_task"]["base"], 25.0)
+        self.assertAlmostEqual(rows["avg_tool_calls_per_task"]["cand"], 28.0)
+        self.assertAlmostEqual(rows["avg_time_to_done_s"]["base"], 250.0)
+        self.assertAlmostEqual(rows["avg_time_to_done_s"]["cand"], 200.0)
+        self.assertEqual(result["status"], "REGRESSION")
+        flagged = {r["metric"] for r in result["regressions"]}
+        self.assertEqual(flagged, {"done_rate_pct", "failures"})
+        no_time = compare_mod.compare_datasets(self._payload(1, 0, 0, 0, 0),
+                                               self._payload(1, 0, 0, 0, 0))
+        no_time_row = {r["metric"]: r for r in no_time["metrics"]}
+        self.assertIsNone(no_time_row["avg_time_to_done_s"]["base"])
+        self.assertIsNone(no_time_row["avg_time_to_done_s"]["delta"])
+        self.assertEqual(no_time["status"], "PASS")
+
+    def test_compare_regression_flags(self):
+        base = self._payload(10, 9, 0, 100, 1000, success_rate=0.9)
+        at_limit = self._payload(10, 9, 0, 120, 1250, success_rate=0.85)
+        self.assertEqual(
+            compare_mod.compare_datasets(base, at_limit)["status"], "PASS")
+        over = self._payload(10, 9, 1, 121, 1251, success_rate=0.849)
+        result = compare_mod.compare_datasets(base, over)
+        self.assertEqual(result["status"], "REGRESSION")
+        flagged = {r["metric"] for r in result["regressions"]}
+        self.assertEqual(flagged,
+                         {"tool_calls", "tokens_total",
+                          "done_rate_pct", "failures"})
+        for reg in result["regressions"]:
+            self.assertIn("threshold", reg["reason"])
+        zero_base = compare_mod.compare_datasets(
+            self._payload(2, 2, 0, 0, 0), self._payload(2, 2, 0, 1, 0))
+        self.assertEqual(zero_base["status"], "REGRESSION")
+        self.assertEqual(zero_base["regressions"][0]["metric"], "tool_calls")
+
+    def test_compare_json_schema_and_exit_codes(self):
+        base = self._write_dataset("base", self._payload(
+            2, 2, 0, 10, 1000, times=[10.0, 20.0]))
+        cand = self._write_dataset("cand", self._payload(
+            2, 1, 1, 13, 1300, times=[10.0, None]))
+        code, data = self._run_json(base, cand)
+        self.assertEqual(code, 1)
+        self.assertEqual(set(data.keys()),
+                         {"base_dir", "cand_dir", "status",
+                          "metrics", "regressions"})
+        self.assertEqual(data["status"], "REGRESSION")
+        self.assertEqual(os.path.abspath(base), data["base_dir"])
+        self.assertEqual(os.path.abspath(cand), data["cand_dir"])
+        self.assertGreaterEqual(len(data["regressions"]), 3)
+        for reg in data["regressions"]:
+            self.assertEqual(set(reg.keys()),
+                             {"metric", "base", "cand", "delta",
+                              "delta_pct", "reason"})
+        rows = {r["metric"]: r for r in data["metrics"]}
+        self.assertTrue(
+            {"metric", "label", "base", "cand", "delta", "delta_pct",
+             "checked", "threshold", "regression"}
+            <= set(rows["tool_calls"].keys()))
+        self.assertEqual(rows["tool_calls"]["threshold"],
+                         {"kind": "pct_increase", "limit": 20.0})
+        out = StringIO()
+        with redirect_stdout(out):
+            md_code = compare_mod.main(["--base", base, "--cand", cand])
+        self.assertEqual(md_code, 1)
+        md = out.getvalue()
+        self.assertIn("| Metric | Base | Candidate | Delta | Delta % | Status |", md)
+        self.assertIn("**REGRESSION**", md)
+        self.assertIn("Done rate", md)
+        pass_code, pass_data = self._run_json(base, base)
+        self.assertEqual(pass_code, 0)
+        self.assertEqual(pass_data["status"], "PASS")
+        self.assertEqual(pass_data["regressions"], [])
+
+    def test_compare_rebuild_jsonl_and_invalid_input(self):
+        events = [
+            {"time": "2026-09-14T07:00:00Z", "event": "TASK_CREATED",
+             "task": "TASK-R1"},
+            {"time": "2026-09-14T07:10:00Z", "event": "TASK_DONE",
+             "task": "TASK-R1"},
+        ]
+        calls = [
+            {"time": "2026-09-14T07:01:00Z", "task": "TASK-R1",
+             "operation": "CALL", "tokens_in": 10, "tokens_out": 5,
+             "status": "ok"},
+            {"time": "2026-09-14T07:02:00Z", "task": "TASK-R1",
+             "operation": "CALL", "tokens_in": 5, "tokens_out": 5,
+             "status": "ok"},
+        ]
+        roots = []
+        for name in ("run-a", "run-b"):
+            mgr = os.path.join(self.tmp.name, name, ".agent", "manager")
+            os.makedirs(mgr)
+            with open(os.path.join(mgr, "events.jsonl"), "w",
+                      encoding="utf-8") as f:
+                for row in events:
+                    f.write(json.dumps(row) + "\n")
+            with open(os.path.join(mgr, "tool-calls.jsonl"), "w",
+                      encoding="utf-8") as f:
+                for row in calls:
+                    f.write(json.dumps(row) + "\n")
+            roots.append(os.path.join(self.tmp.name, name))
+        code, data = self._run_json(roots[0], roots[1])
+        self.assertEqual(code, 0)
+        self.assertEqual(data["status"], "PASS")
+        rows = {r["metric"]: r for r in data["metrics"]}
+        self.assertEqual(rows["total_tasks"]["base"], 1)
+        self.assertEqual(rows["tool_calls"]["base"], 2)
+        self.assertEqual(rows["tokens_total"]["base"], 25)
+        self.assertAlmostEqual(rows["avg_time_to_done_s"]["base"], 600.0)
+        for root in roots:
+            self.assertTrue(os.path.exists(
+                os.path.join(root, ".agent", "manager", "metrics.json")))
+        missing = os.path.join(self.tmp.name, "missing")
+        empty = os.path.join(self.tmp.name, "empty")
+        os.makedirs(empty)
+        broken = self._write_dataset("broken", {"nope": True})
+        for bad in (missing, empty, broken):
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                self.assertEqual(
+                    compare_mod.main(["--base", bad, "--cand", roots[0]]), 2)
 
 
 if __name__ == "__main__":
