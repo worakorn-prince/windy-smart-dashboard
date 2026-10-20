@@ -136,7 +136,7 @@ def test_action_endpoints_accept_correct_token(client, monkeypatch):
 
 
 def _store_function_body(src: str, name: str) -> str:
-    m = re.search(rf"async function {name}\([^)]*\) \{{(.*?)\n  \}}", src, re.S)
+    m = re.search(rf"async function {name}\([^)]*\) \{{(.*?)\n  \}}", src, re.DOTALL)
     assert m, f"function {name} not found in stores/security.ts"
     return m.group(1)
 
