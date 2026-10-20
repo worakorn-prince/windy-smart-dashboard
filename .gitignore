@@ -12,6 +12,7 @@ venv/
 
 # Caches & reports
 backend/.cache/
+.ruff_cache/
 
 # Frontend
 frontend/node_modules/
@@ -31,4 +32,7 @@ Thumbs.db
 README.th.md
 design.md
 
-.openvisio/
+# Agent tool-call logging + dashboard (runtime, per-project)
+.agent/
+dashboard/data.json
+dashboard/all-projects.json
