@@ -3,6 +3,7 @@ import { onMounted } from 'vue'
 import { useMetricsStore } from '@/stores/metrics'
 import HealthStrip from '@/components/dashboard/HealthStrip.vue'
 import AlertsCard from '@/components/dashboard/AlertsCard.vue'
+import AlertRulesCard from '@/components/dashboard/AlertRulesCard.vue'
 import CpuCard from '@/components/dashboard/CpuCard.vue'
 import RamCard from '@/components/dashboard/RamCard.vue'
 import GpuCard from '@/components/dashboard/GpuCard.vue'
@@ -25,7 +26,10 @@ onMounted(() => {
 <template>
   <div class="dashboard">
     <HealthStrip />
-    <AlertsCard />
+    <div class="grid">
+      <AlertsCard />
+      <AlertRulesCard />
+    </div>
     <div class="grid primary-zone" data-testid="primary-zone">
       <CpuCard :cpu="store.cpu" :history="store.cpuHistory" />
       <RamCard :ram="store.ram" :history="store.ramHistory" />

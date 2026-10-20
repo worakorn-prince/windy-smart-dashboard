@@ -209,6 +209,24 @@ export interface AlertItem {
   uid?: string
 }
 
+export interface AlertRule {
+  id: string
+  metric: string
+  op: string
+  threshold: number
+  enabled: boolean
+}
+
+export interface AlertChannels {
+  toast: boolean
+  sound: boolean
+}
+
+export interface AlertRulesPayload {
+  rules: AlertRule[]
+  channels: AlertChannels
+}
+
 export type SeverityLevel = 'ok' | 'warn' | 'crit'
 export type SeverityKind = 'cpu' | 'ram' | 'temp' | 'gpu'
 
@@ -314,17 +332,77 @@ export const useMetricsStore = defineStore('metrics', () => {
   }
 
   const alerts = ref<AlertItem[]>([])
+  const alertRules = ref<AlertRulesPayload | null>(null)
+  const alertRulesSaving = ref(false)
+  const alertRulesError = ref<string | null>(null)
+
+  let audioCtx: AudioContext | null = null
+
+  function playAlertBeep() {
+    try {
+      const Ctor = window.AudioContext ?? (window as any).webkitAudioContext
+      if (!Ctor) return
+      audioCtx = audioCtx ?? new Ctor()
+      const ctx = audioCtx
+      if (ctx.state === 'suspended') void ctx.resume()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.value = 880
+      gain.gain.setValueAtTime(0.08, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start()
+      osc.stop(ctx.currentTime + 0.4)
+    } catch { /* best-effort */ }
+  }
 
   function pushAlert(a: AlertItem) {
     const uid = `${a.id}-${Date.now()}`
     alerts.value.push({ ...a, uid })
     if (alerts.value.length > 5) alerts.value.shift()
+    if (alertRules.value?.channels.sound) playAlertBeep()
     window.setTimeout(() => dismissAlert(uid), 12000)
   }
 
   function dismissAlert(uid: string) {
     const i = alerts.value.findIndex(x => x.uid === uid)
     if (i >= 0) alerts.value.splice(i, 1)
+  }
+
+  async function loadAlertRules() {
+    try {
+      const resp = await fetch('/api/alerts/rules')
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      alertRules.value = await resp.json()
+      alertRulesError.value = null
+    } catch (err: any) {
+      alertRulesError.value = String(err?.message ?? err)
+    }
+  }
+
+  async function saveAlertRules(payload: AlertRulesPayload): Promise<boolean> {
+    alertRulesSaving.value = true
+    alertRulesError.value = null
+    try {
+      const resp = await fetch('/api/alerts/rules', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!resp.ok) {
+        const detail = await resp.json().catch(() => null)
+        throw new Error(String(detail?.detail ?? `HTTP ${resp.status}`))
+      }
+      alertRules.value = await resp.json()
+      return true
+    } catch (err: any) {
+      alertRulesError.value = String(err?.message ?? err)
+      return false
+    } finally {
+      alertRulesSaving.value = false
+    }
   }
 
   async function runSpeedtest() {
@@ -349,8 +427,8 @@ export const useMetricsStore = defineStore('metrics', () => {
     cpu, ram, disk, network, system, gpu, processes, ping,
     cpuHistory, ramHistory, netSendHistory, netRecvHistory,
     speedtest, speedtestRunning,
-    alerts,
+    alerts, alertRules, alertRulesSaving, alertRulesError,
     cpuOverall, ramPercent, sensorStatus,
-    connect, runSpeedtest, dismissAlert,
+    connect, runSpeedtest, dismissAlert, loadAlertRules, saveAlertRules,
   }
 })

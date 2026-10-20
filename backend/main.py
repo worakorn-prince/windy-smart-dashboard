@@ -7,6 +7,8 @@ Endpoints:
   GET /                  — serve frontend build (production)
   GET /api/system         — initial system info
   POST /api/speedtest     — run Internet speed test
+  GET /api/alerts/rules   — effective alert rules + channels
+  PUT /api/alerts/rules   — replace rules+channels (validated, hot-reload)
   GET /api/security/suspicious      — current suspicious countries
   PUT /api/security/suspicious      — override (persisted to cache)
   POST /api/security/audit           — run an on-demand audit
@@ -40,7 +42,13 @@ import history
 from maintenance.router import router as maintenance_router
 import metrics
 import speedtest_worker
-from alerts import evaluate as evaluate_alerts, send_toast
+from alerts import (
+    evaluate as evaluate_alerts,
+    get_channels as get_alert_channels,
+    get_rules as get_alert_rules,
+    send_toast,
+    set_rules as set_alert_rules,
+)
 from config import (
     FRONTEND_DIST,
     HOST,
@@ -150,7 +158,7 @@ app.add_middleware(
     allow_origins=[f"http://localhost:{config.PORT}", "http://127.0.0.1:5173",
                    "http://localhost:5173"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Admin-Token"],
 )
 
@@ -238,9 +246,11 @@ async def _history_loop() -> None:
         try:
             sample = await asyncio.to_thread(history.record_sample)
             fired = await asyncio.to_thread(evaluate_alerts, sample)
+            toast_enabled = get_alert_channels().get("toast", True)
             for a in fired:
                 await manager.broadcast("metrics", {"type": "alert", **a})
-                await send_toast(a["title"], a["message"])
+                if toast_enabled:
+                    await send_toast(a["title"], a["message"])
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -314,6 +324,22 @@ async def api_speedtest() -> dict[str, Any]:
     result = await speedtest_worker.run_speedtest_async()
     await manager.broadcast("metrics", {"type": "speedtest_result", **result})
     return result
+
+
+@app.get("/api/alerts/rules")
+async def api_alert_rules_get() -> dict[str, Any]:
+    """Effective alert rules + notification channels."""
+    return get_alert_rules()
+
+
+@app.put("/api/alerts/rules")
+async def api_alert_rules_put(payload: dict[str, Any]) -> dict[str, Any]:
+    """Replace rules+channels; validates and hot-reloads the evaluator."""
+    try:
+        saved = set_alert_rules(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return saved
 
 
 @app.get("/api/security/suspicious")
