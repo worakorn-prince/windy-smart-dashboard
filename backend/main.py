@@ -37,6 +37,7 @@ from fastapi.staticfiles import StaticFiles
 
 import config
 import history
+from maintenance.router import router as maintenance_router
 import metrics
 import speedtest_worker
 from alerts import evaluate as evaluate_alerts, send_toast
@@ -425,6 +426,8 @@ async def ws_security(ws: WebSocket) -> None:
     finally:
         manager.security.discard(ws)
 
+
+app.include_router(maintenance_router)
 
 # ---- Serving frontend (production) ---- #
 

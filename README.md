@@ -332,6 +332,52 @@ environment variables:
 
 ---
 
+## 🧰 Maintenance module
+
+Windows housekeeping ported from the legacy `updater` project
+(`MERGE-005b`). The backend lives in `backend/maintenance/` (guards,
+22 error codes, PowerShell runner, scanner cache 30 s, system cache 60 s,
+actions, cleaner, history, export, router) and exposes device/driver scan
+status, action history, CSV/JSON export, and a guarded cleaner for temp
+folders and the recycle bin.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/maintenance/status` | Cached system + scanner status |
+| GET | `/api/maintenance/scan?refresh=1` | Device/driver scan (`refresh=1` bypasses the 30 s cache) |
+| GET | `/api/maintenance/history?limit=100` | Recent rows from the `maintenance_actions` table (SQLite `HISTORY_DB`) |
+| POST | `/api/maintenance/action` | `{action}` → `wu-scan` or `pnputil-scan` |
+| POST | `/api/maintenance/clean` | `{targets, confirm:true}` → `user-temp`, `windows-temp`, `recycle-bin` |
+| POST | `/api/maintenance/export` | `{kind, format}` → devices/history × csv/json |
+| POST | `/api/maintenance/relaunch` | Always `501 RELAUNCH_DISABLED` |
+
+Access control:
+
+- Host allowlist: `127.0.0.1`, `localhost`, `::1` only.
+- Every `POST` must send `X-Requested-With: windy-dashboard` (CSRF guard).
+- `require_admin`: when `DASH_ADMIN_TOKEN` is set, `X-Admin-Token` is
+  required; otherwise only loopback requests are accepted.
+
+UI: route `/maintenance` (`frontend/src/main.ts`) renders
+`pages/Maintenance.vue` with `components/maintenance/`
+(`MaintenanceTable`, `MaintenancePanel`, `MaintenanceHistory`,
+`MaintenanceAdminBanner`) and the Pinia store `stores/maintenance.ts`.
+Sort choice persists in `localStorage['dashboard:maintenance:sort']`;
+an admin token (if used) is stored in `localStorage['dashboard:adminToken']`.
+
+Tests:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m pytest tests -q
+```
+
+> ⛔ Maintenance never auto-installs or auto-updates anything. `wu-scan`
+> and `pnputil-scan` are read-only scans, `clean` requires `confirm: true`,
+> and `relaunch` is permanently disabled (`501`).
+
+---
+
 ## 🧪 Testing
 
 Backend unit tests (pytest) cover the alert engine, history bucketing,

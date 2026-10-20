@@ -1,0 +1,22 @@
+{
+  "actions": [
+    "wu-scan",
+    "pnputil-scan",
+    "open-devmgmt"
+  ],
+  "targets": [
+    "user-temp",
+    "windows-temp",
+    "recycle-bin"
+  ],
+  "csvHeader": [
+    "device",
+    "driverName",
+    "version",
+    "date",
+    "status",
+    "deviceId",
+    "errorCode",
+    "errorText"
+  ]
+}

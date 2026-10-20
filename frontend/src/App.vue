@@ -25,6 +25,7 @@ applyTheme()
       <nav>
         <RouterLink to="/" active-class="active">Dashboard</RouterLink>
         <RouterLink to="/security" active-class="active">Security</RouterLink>
+        <RouterLink to="/maintenance" active-class="active">Maintenance</RouterLink>
       </nav>
       <button data-testid="theme-toggle" @click="toggleTheme" class="theme-toggle">{{ theme === 'dark' ? '☀️ สว่าง' : '🌙 มืด' }}</button>
     </header>

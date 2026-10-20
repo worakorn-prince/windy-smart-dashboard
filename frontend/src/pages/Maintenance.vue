@@ -1,0 +1,220 @@
+<script setup lang="ts">
+import { onMounted } from 'vue'
+import { useMaintenanceStore } from '@/stores/maintenance'
+import MaintenanceAdminBanner from '@/components/maintenance/MaintenanceAdminBanner.vue'
+import MaintenancePanel from '@/components/maintenance/MaintenancePanel.vue'
+import MaintenanceTable from '@/components/maintenance/MaintenanceTable.vue'
+import MaintenanceHistory from '@/components/maintenance/MaintenanceHistory.vue'
+
+const store = useMaintenanceStore()
+
+function text(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—'
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+  if (Array.isArray(value)) return value.map(text).join(', ')
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
+function memoryText(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—'
+  if (typeof value !== 'object') return String(value)
+  const o = value as Record<string, any>
+  const total = o.total ?? o.totalGB ?? o.TotalGB ?? o.totalBytes
+  const free = o.free ?? o.freeGB ?? o.FreeGB ?? o.available
+  const pct = o.usedPercent ?? o.used_pct ?? o.percent ?? o.loadPercent
+  const parts: string[] = []
+  if (total !== undefined) parts.push(`total ${total}`)
+  if (free !== undefined) parts.push(`free ${free}`)
+  if (pct !== undefined) parts.push(`used ${pct}`)
+  return parts.length ? parts.join(' · ') : text(value)
+}
+
+function diskText(value: unknown): string {
+  if (value === null || value === undefined) return '—'
+  if (typeof value !== 'object') return String(value)
+  const o = value as Record<string, any>
+  const name = o.drive ?? o.name ?? o.letter ?? o.device ?? o.mount ?? ''
+  const free = o.free ?? o.freeGB ?? o.FreeGB ?? o.available
+  const total = o.total ?? o.totalGB ?? o.TotalGB ?? o.size
+  const pct = o.usedPercent ?? o.used_pct ?? o.percent
+  const parts: string[] = []
+  if (name) parts.push(String(name))
+  if (total !== undefined && free !== undefined) parts.push(`${free}/${total} GB`)
+  if (pct !== undefined) parts.push(`${pct}% used`)
+  return parts.length ? parts.join(' · ') : text(value)
+}
+
+function formatDate(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—'
+  const raw = String(value)
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) return raw
+  return parsed.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'medium' })
+}
+
+async function relaunch() {
+  await store.runAction('relaunch')
+}
+
+async function exportData(kind: 'devices' | 'history', format: 'csv' | 'json') {
+  await store.downloadExport(kind, format)
+}
+
+onMounted(() => {
+  store.loadStatus()
+  store.loadScan(false)
+})
+</script>
+
+<template>
+  <div class="maintenance-page">
+    <MaintenanceAdminBanner />
+
+    <div v-if="store.error" class="banner error" role="alert">
+      <span>⚠️ {{ store.error }}</span>
+      <button class="btn tiny" @click="store.error = ''">ปิด</button>
+    </div>
+    <div v-if="store.notice" class="banner notice" role="status">
+      <span>ℹ️ {{ store.notice }}</span>
+      <button class="btn tiny" @click="store.notice = ''">ปิด</button>
+    </div>
+
+    <div class="page-head">
+      <h2>
+        Maintenance
+        <span v-if="store.hasIssues" class="badge high">{{ store.counts.issues }} issues</span>
+      </h2>
+      <div class="head-actions">
+        <button :disabled="!!store.busy" @click="relaunch">
+          {{ store.busy === 'relaunch' ? 'กำลังสั่งงาน…' : 'รีสตาร์ทบริการ (relaunch)' }}
+        </button>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h3>สรุปสถานะระบบ</h3>
+        <p v-if="store.loading" class="muted">กำลังโหลดสถานะ…</p>
+        <template v-else-if="store.system">
+          <div class="row">
+            <span class="label">สิทธิ์ผู้ดูแล</span>
+            <span class="value">
+              <span class="badge" :class="store.isAdmin ? 'low' : 'medium'">
+                {{ store.isAdmin ? 'Administrator' : 'Standard user' }}
+              </span>
+            </span>
+          </div>
+          <div class="row">
+            <span class="label">ระบบปฏิบัติการ</span>
+            <span class="value text-truncate" v-auto-tip>{{ text(store.system.os) }}</span>
+          </div>
+          <div class="row">
+            <span class="label">CPU</span>
+            <span class="value text-truncate" v-auto-tip>{{ text(store.system.cpu) }}</span>
+          </div>
+          <div class="row">
+            <span class="label">หน่วยความจำ</span>
+            <span class="value">{{ memoryText(store.system.memory) }}</span>
+          </div>
+          <div class="row">
+            <span class="label">ดิสก์</span>
+            <span class="value">{{ (store.system.disks || []).length }} รายการ</span>
+          </div>
+          <div v-if="store.system.disks && store.system.disks.length" class="disk-list">
+            <span v-for="(disk, i) in store.system.disks" :key="i" class="kbd disk-chip">{{ diskText(disk) }}</span>
+          </div>
+          <div class="row">
+            <span class="label">PowerShell</span>
+            <span class="value">{{ text(store.system.psVersion) }}</span>
+          </div>
+          <div class="row">
+            <span class="label">Python</span>
+            <span class="value">{{ text(store.system.pythonVersion) }}</span>
+          </div>
+          <div class="row">
+            <span class="label">เก็บข้อมูลเมื่อ</span>
+            <span class="value">{{ formatDate(store.system.collectedAt) }}</span>
+          </div>
+        </template>
+        <p v-else class="muted">ยังไม่มีข้อมูลสถานะระบบ</p>
+        <button class="btn primary as-button" :disabled="store.loading" @click="store.loadStatus()">รีเฟรชสถานะ</button>
+      </div>
+
+      <MaintenancePanel />
+
+      <div class="card">
+        <h3>ส่งออกข้อมูล</h3>
+        <p class="muted small">ดาวน์โหลดรายการไดรเวอร์หรือประวัติการบำรุงรักษา</p>
+        <div class="action-list">
+          <button :disabled="!!store.busy" @click="exportData('devices', 'csv')">Devices CSV</button>
+          <button :disabled="!!store.busy" @click="exportData('devices', 'json')">Devices JSON</button>
+          <button :disabled="!!store.busy" @click="exportData('history', 'csv')">History CSV</button>
+          <button :disabled="!!store.busy" @click="exportData('history', 'json')">History JSON</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="full-row">
+      <MaintenanceTable :devices="store.devices" :counts="store.counts" :scanning="store.scanning" />
+    </div>
+
+    <div class="full-row">
+      <MaintenanceHistory />
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.maintenance-page { display: flex; flex-direction: column; gap: 16px; }
+
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.banner.error { border-color: var(--bad); color: var(--bad); }
+.banner.notice { border-color: var(--info); color: var(--info); }
+
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.page-head h2 { margin: 0; font-size: 18px; display: flex; align-items: center; gap: 10px; }
+.head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.full-row > :deep(.card) { width: 100%; }
+
+.disk-list { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 8px; }
+.disk-chip { max-width: 100%; }
+
+.action-list { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.as-button { margin-top: 8px; }
+
+.btn {
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.btn.tiny { padding: 3px 10px; font-size: 11px; line-height: 1.4; }
+.btn:hover:not(:disabled) { background: var(--border); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+h3 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+</style>
