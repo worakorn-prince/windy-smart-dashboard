@@ -67,6 +67,12 @@ export interface CleanResult {
   targets: string[]
 }
 
+export interface RelaunchResult {
+  status?: string
+  pid?: number
+  [key: string]: unknown
+}
+
 interface HttpError extends Error {
   status?: number
   code?: string
@@ -202,11 +208,6 @@ export const useMaintenanceStore = defineStore('maintenance', () => {
       throw httpError(ADMIN_TOKEN_HINT, resp.status, code || 'UNAUTHORIZED')
     }
 
-    if (resp.status === 501 || code === 'RELAUNCH_DISABLED') {
-      notice.value = apiError(data, resp.status)
-      return null
-    }
-
     if (!resp.ok) {
       throw httpError(apiError(data, resp.status), resp.status, code)
     }
@@ -310,14 +311,38 @@ export const useMaintenanceStore = defineStore('maintenance', () => {
     error.value = ''
     notice.value = ''
     try {
-      const path = action === 'relaunch' ? '/api/maintenance/relaunch' : '/api/maintenance/action'
-      const body = action === 'relaunch' ? {} : { action }
-      const res = await postJson<any>(path, body)
+      const res = await postJson<any>('/api/maintenance/action', { action })
       if (!res) return null
       notice.value = String(res.message ?? res.reason ?? `สั่งงาน "${action}" เรียบร้อย`)
       return res
     } catch (err) {
       error.value = errMessage(err, `สั่งงาน "${action}" ไม่สำเร็จ`)
+      return null
+    } finally {
+      busy.value = null
+    }
+  }
+
+  async function runRelaunch() {
+    busy.value = 'relaunch'
+    error.value = ''
+    notice.value = ''
+    try {
+      const res = await postJson<RelaunchResult>('/api/maintenance/relaunch', {
+        confirm: 'relaunch',
+      })
+      if (!res) {
+        error.value = 'เซิร์ฟเวอร์ไม่ตอบรับคำขอรีสตาร์ท'
+        return null
+      }
+      return res
+    } catch (err) {
+      const code = String((err as HttpError)?.code ?? '').toLowerCase()
+      if (code === 'confirmation_required') {
+        error.value = 'ต้องพิมพ์คำว่า "relaunch" เพื่อยืนยันการรีสตาร์ทบริการ'
+      } else {
+        error.value = errMessage(err, 'สั่งรีสตาร์ทบริการไม่สำเร็จ')
+      }
       return null
     } finally {
       busy.value = null
@@ -477,6 +502,7 @@ export const useMaintenanceStore = defineStore('maintenance', () => {
     loadHistory,
     loadCleanSummary,
     runAction,
+    runRelaunch,
     runClean,
     downloadExport,
   }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useMaintenanceStore } from '@/stores/maintenance'
 import { formatBytes, formatPercent } from '@/utils/format'
 import MaintenanceAdminBanner from '@/components/maintenance/MaintenanceAdminBanner.vue'
@@ -109,8 +109,91 @@ function formatDate(value: unknown): string {
   return parsed.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'medium' })
 }
 
-async function relaunch() {
-  await store.runAction('relaunch')
+const RELAUNCH_POLL_MS = 3000
+const RELAUNCH_TIMEOUT_MS = 60000
+
+type RelaunchState = 'idle' | 'scheduled' | 'reconnected' | 'timeout'
+
+const confirmOpen = ref(false)
+const confirmText = ref('')
+const relaunchState = ref<RelaunchState>('idle')
+const confirmOk = computed(() => confirmText.value.trim() === 'relaunch')
+
+let pollTimer: ReturnType<typeof setInterval> | null = null
+let pollInFlight = false
+
+const relaunchStatusText = computed(() => {
+  switch (relaunchState.value) {
+    case 'scheduled':
+      return 'scheduled — หน้านี้จะหลุดการเชื่อมต่อ'
+    case 'reconnected':
+      return 'เชื่อมต่อเซิร์ฟเวอร์ใหม่ได้แล้ว'
+    case 'timeout':
+      return 'ยังเชื่อมต่อเซิร์ฟเวอร์ไม่ได้ภายใน 60 วินาที'
+    default:
+      return ''
+  }
+})
+
+function stopReconnectWatch() {
+  if (pollTimer !== null) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+async function checkReconnected(deadline: number) {
+  if (pollInFlight) return
+  pollInFlight = true
+  try {
+    const resp = await fetch('/api/system', { cache: 'no-store' })
+    if (resp.ok) {
+      stopReconnectWatch()
+      relaunchState.value = 'reconnected'
+      await Promise.all([store.loadStatus(), store.loadScan(false)])
+      return
+    }
+  } catch {
+    // backend still restarting
+  } finally {
+    pollInFlight = false
+  }
+  if (Date.now() >= deadline && relaunchState.value === 'scheduled') {
+    stopReconnectWatch()
+    relaunchState.value = 'timeout'
+    store.error = 'ยังเชื่อมต่อเซิร์ฟเวอร์ไม่ได้ภายใน 60 วินาที — ตรวจสอบว่าเซิร์ฟเวอร์รันอยู่'
+  }
+}
+
+function startReconnectWatch() {
+  stopReconnectWatch()
+  const deadline = Date.now() + RELAUNCH_TIMEOUT_MS
+  pollTimer = setInterval(() => {
+    void checkReconnected(deadline)
+  }, RELAUNCH_POLL_MS)
+}
+
+function openRelaunch() {
+  if (store.busy) return
+  if (relaunchState.value !== 'scheduled') relaunchState.value = 'idle'
+  confirmText.value = ''
+  confirmOpen.value = true
+}
+
+function closeRelaunch() {
+  if (store.busy === 'relaunch') return
+  confirmOpen.value = false
+  confirmText.value = ''
+}
+
+async function confirmRelaunch() {
+  if (!confirmOk.value || store.busy === 'relaunch') return
+  const res = await store.runRelaunch()
+  confirmOpen.value = false
+  confirmText.value = ''
+  if (!res) return
+  relaunchState.value = 'scheduled'
+  startReconnectWatch()
 }
 
 async function exportData(kind: 'devices' | 'history', format: 'csv' | 'json') {
@@ -121,6 +204,8 @@ onMounted(() => {
   store.loadStatus()
   store.loadScan(false)
 })
+
+onUnmounted(stopReconnectWatch)
 </script>
 
 <template>
@@ -135,6 +220,14 @@ onMounted(() => {
       <span>{{ store.notice }}</span>
       <button class="btn tiny" @click="store.notice = ''">ปิด</button>
     </div>
+    <div
+      v-if="relaunchStatusText"
+      class="banner"
+      :class="relaunchState === 'timeout' ? 'error' : 'notice'"
+      role="status"
+    >
+      <span>{{ relaunchStatusText }}</span>
+    </div>
 
     <div class="page-head">
       <h2>
@@ -142,7 +235,10 @@ onMounted(() => {
         <span v-if="store.hasIssues" class="badge high">{{ store.counts.issues }} issues</span>
       </h2>
       <div class="head-actions">
-        <button :disabled="!!store.busy" @click="relaunch">
+        <button
+          :disabled="!!store.busy || relaunchState === 'scheduled'"
+          @click="openRelaunch"
+        >
           {{ store.busy === 'relaunch' ? 'กำลังสั่งงาน…' : 'รีสตาร์ทบริการ (relaunch)' }}
         </button>
       </div>
@@ -218,6 +314,37 @@ onMounted(() => {
     <div class="full-row">
       <MaintenanceHistory />
     </div>
+
+    <div v-if="confirmOpen" class="modal-backdrop" @click.self="closeRelaunch">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="relaunch-title">
+        <h3 id="relaunch-title">ยืนยันการรีสตาร์ทบริการ</h3>
+        <p class="muted">
+          การรีสตาร์ทจะตัดการเชื่อมต่อชั่วคราว หน้าจอนี้จะพยายามเชื่อมต่อใหม่ให้อัตโนมัติ
+          ภายใน 60 วินาที — พิมพ์คำว่า <span class="kbd">relaunch</span> เพื่อยืนยัน
+        </p>
+        <input
+          v-model="confirmText"
+          class="confirm-input"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="relaunch"
+          @keyup.enter="confirmRelaunch"
+        />
+        <div class="modal-actions">
+          <button class="btn" :disabled="store.busy === 'relaunch'" @click="closeRelaunch">
+            ยกเลิก
+          </button>
+          <button
+            class="btn primary"
+            :disabled="!confirmOk || store.busy === 'relaunch'"
+            @click="confirmRelaunch"
+          >
+            {{ store.busy === 'relaunch' ? 'กำลังสั่งงาน…' : 'ยืนยันรีสตาร์ท' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -266,6 +393,52 @@ onMounted(() => {
 .btn.tiny { padding: 3px 10px; font-size: 11px; line-height: 1.4; }
 .btn:hover:not(:disabled) { background: var(--border); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.modal {
+  width: 100%;
+  max-width: 420px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+}
+
+.modal h3 { margin: 0 0 8px; }
+.modal p { margin: 0 0 12px; line-height: 1.5; }
+
+.confirm-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+}
+.confirm-input:focus {
+  outline: none;
+  border-color: var(--info);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.modal-actions .btn { padding: 6px 14px; }
 
 h3 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 </style>

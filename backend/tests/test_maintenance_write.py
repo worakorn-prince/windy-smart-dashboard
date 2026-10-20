@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 import config
 import main
-from maintenance import actions, cleaner, error_codes, export
+from maintenance import actions, cleaner, export
 from maintenance import history as action_log
 
 router_module = sys.modules["maintenance.router"]
@@ -364,14 +364,20 @@ def test_export_endpoint_history_json():
     assert rows[0]["action"] == "wu-scan"
 
 
-def test_relaunch_stays_disabled():
-    response = _post("/relaunch", {})
-    assert response.status_code == 501
-    detail = response.json()["detail"]
-    assert detail["code"] == "RELAUNCH_DISABLED"
-    assert "run.ps1" in detail["hint"]
+def test_relaunch_requires_confirmation(monkeypatch):
+    scheduled: list[int] = []
 
-    assert error_codes.NOT_IMPLEMENTED is not None  # legacy constant still importable
+    def _fake_schedule(pid: int):
+        scheduled.append(pid)
+
+    monkeypatch.setattr(router_module, "_schedule_relaunch", _fake_schedule)
+
+    response = _post("/relaunch", {})
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["code"] == "CONFIRMATION_REQUIRED"
+    assert detail["action"] == "relaunch"
+    assert scheduled == []
 
 
 if __name__ == "__main__":
