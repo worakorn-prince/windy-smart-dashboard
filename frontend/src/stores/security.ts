@@ -18,6 +18,14 @@ export interface AuditReport {
   data: any
 }
 
+export interface PersistedSecurityEvent {
+  id: number
+  ts: string
+  kind: string
+  source_ip: string
+  detail: any
+}
+
 const MAX_EVENTS = 200
 
 const ADMIN_TOKEN_KEY = 'dash_admin_token'
@@ -32,6 +40,7 @@ function loadAdminToken(): string {
 
 export const useSecurityStore = defineStore('security', () => {
   const events = ref<SecurityEvent[]>([])
+  const securityEvents = ref<PersistedSecurityEvent[]>([])
   const audit = ref<AuditReport | null>(null)
   const auditRunning = ref(false)
   const suspiciousCountries = ref<string[]>([])
@@ -120,6 +129,27 @@ export const useSecurityStore = defineStore('security', () => {
     }
   }
 
+  async function loadSecurityEvents(limit = 50): Promise<{ ok: boolean; reason?: string; count?: number }> {
+    try {
+      const resp = await fetch(`/api/security/events?limit=${limit}`, { headers: authHeaders() })
+      if (resp.status === 401 || resp.status === 403) {
+        securityEvents.value = []
+        return {
+          ok: false,
+          reason: resp.status === 401
+            ? 'Unauthorized (401): admin token missing or invalid — set it in Security Settings'
+            : 'Forbidden (403): event history is allowed from localhost only',
+        }
+      }
+      const data = await resp.json()
+      securityEvents.value = Array.isArray(data.events) ? data.events : []
+      return { ok: true, count: securityEvents.value.length }
+    } catch (err: any) {
+      console.error('Failed to load security event history', err)
+      return { ok: false, reason: 'Failed to load event history' }
+    }
+  }
+
   async function saveSuspicious(countries: string[]) {
     const resp = await fetch('/api/security/suspicious', {
       method: 'PUT',
@@ -201,8 +231,8 @@ export const useSecurityStore = defineStore('security', () => {
   }
 
   return {
-    events, audit, auditRunning, suspiciousCountries, adminToken,
-    connect, loadSuspicious, saveSuspicious, runAudit,
+    events, securityEvents, audit, auditRunning, suspiciousCountries, adminToken,
+    connect, loadSuspicious, loadSecurityEvents, saveSuspicious, runAudit,
     setAdminToken, clearAdminToken,
     killProcess, blockIp, unblockRule, listBlocked, exportReport,
   }

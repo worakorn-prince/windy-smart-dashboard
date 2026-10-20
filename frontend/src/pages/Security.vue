@@ -6,6 +6,7 @@ import PortsCard from '@/components/security/PortsCard.vue'
 import ConnectionsCard from '@/components/security/ConnectionsCard.vue'
 import DefenderCard from '@/components/security/DefenderCard.vue'
 import FailedLoginsCard from '@/components/security/FailedLoginsCard.vue'
+import LiveEventsLog from '@/components/security/LiveEventsLog.vue'
 import SecurityEventsLog from '@/components/security/SecurityEventsLog.vue'
 import SettingsPanel from '@/components/security/SettingsPanel.vue'
 import BlockedRulesCard from '@/components/security/BlockedRulesCard.vue'
@@ -25,7 +26,7 @@ onMounted(() => {
 
     <!-- Live events always visible at the top -->
     <div class="full-row">
-      <SecurityEventsLog />
+      <LiveEventsLog />
     </div>
 
     <div class="grid">
@@ -47,6 +48,11 @@ onMounted(() => {
     <div class="grid">
       <BlockedRulesCard />
       <SettingsPanel />
+    </div>
+
+    <!-- Persisted event history, right next to the settings grid -->
+    <div class="full-row">
+      <SecurityEventsLog />
     </div>
   </div>
 </template>

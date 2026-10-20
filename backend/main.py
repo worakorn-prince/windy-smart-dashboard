@@ -16,6 +16,7 @@ Endpoints:
   POST /api/security/block           — block outbound IP
   POST /api/security/unblock        — delete a block rule
   GET /api/security/blocked          — list block rules
+  GET /api/security/events           — persisted security event history (admin)
   POST /api/security/export          — {fmt: pdf|html|json} -> returns file
 """
 from __future__ import annotations
@@ -61,6 +62,7 @@ from config import (
 from security import actions
 from security import audit as audit_mod
 from security import monitor as sec_monitor
+from security import persistence as sec_persistence
 
 # ---- logging ---- #
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -101,8 +103,22 @@ def security_event_payload(evt: sec_monitor.Event) -> dict[str, Any]:
     return {"type": "security_event", "event": evt.to_dict()}
 
 
+def _event_source_ip(evt: sec_monitor.Event) -> str:
+    """Best-effort source IP for persistence ("" when the event has none)."""
+    ip = evt.detail.get("ip") if isinstance(evt.detail, dict) else None
+    return str(ip) if ip else ""
+
+
 async def broadcast_security_event(evt: sec_monitor.Event) -> None:
     await manager.broadcast("security", security_event_payload(evt))
+    # Fire-and-forget persistence — a broken DB must never take down the WS path.
+    try:
+        await asyncio.to_thread(
+            sec_persistence.record_event,
+            evt.type, _event_source_ip(evt), evt.detail, evt.timestamp,
+        )
+    except Exception:
+        logger.exception("security event persistence failed")
 
 
 def load_suspicious() -> None:
@@ -401,6 +417,16 @@ async def api_unblock(payload: dict[str, Any], _admin: None = Depends(require_ad
 @app.get("/api/security/blocked")
 async def api_blocked() -> dict[str, Any]:
     return await actions.list_block_rules()
+
+
+@app.get("/api/security/events")
+async def api_security_events(
+    limit: int = Query(default=50, ge=1, le=200),
+    _admin: None = Depends(require_admin),
+) -> dict[str, Any]:
+    """Persisted security event history, newest first (admin-gated)."""
+    events = await asyncio.to_thread(sec_persistence.list_events, limit)
+    return {"events": events, "count": len(events)}
 
 
 @app.post("/api/security/export")
