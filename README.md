@@ -167,7 +167,11 @@ Dashboard/
 │   ├── alerts.py            Threshold alerts + Windows Toast sender
 │   ├── sensors_lhm.py       LibreHardwareMonitorLib interop (temps/power)
 │   ├── speedtest_worker.py  On-demand Internet speed test
-│   ├── tests/               pytest suite (alerts, history, parsers)
+│   ├── maintenance/         Maintenance module (guards, error codes,
+│   │                        PowerShell runner, scanner/system caches,
+│   │                        actions, cleaner, history, export, router)
+│   ├── tests/               pytest suite (alerts, history, parsers,
+│   │                        maintenance, updater parity, WS contract)
 │   ├── requirements.txt
 │   ├── security/
 │   │   ├── audit.py         On-demand audit + finding rules
@@ -188,18 +192,24 @@ Dashboard/
         ├── App.vue          Layout + global styles
         ├── pages/
         │   ├── Dashboard.vue
-        │   └── Security.vue
+        │   ├── Security.vue
+        │   └── Maintenance.vue
         ├── components/
         │   ├── dashboard/   CpuCard, RamCard, DiskCard, NetworkCard,
         │   │                 GpuCard, AdaptersCard, HistoryCard,
-        │   │                 ProcessesCard, SystemCard, SpeedtestCard
-        │   └── security/    AuditCard, PortsCard, ConnectionsCard,
-        │                     DefenderCard, FailedLoginsCard,
-        │                     SecurityEventsLog, SettingsPanel,
-        │                     BlockedRulesCard
+        │   │                 ProcessesCard, SystemCard, SpeedtestCard,
+        │   │                 PowerCard, AlertsCard, HealthStrip
+        │   ├── security/    AuditCard, PortsCard, ConnectionsCard,
+        │   │                 DefenderCard, FailedLoginsCard,
+        │   │                 SecurityEventsLog, SettingsPanel,
+        │   │                 BlockedRulesCard
+        │   └── maintenance/ MaintenanceTable, MaintenancePanel,
+        │                     MaintenanceHistory, MaintenanceAdminBanner
         ├── composables/      useWebSocket, format helpers
         ├── directives/       autoTip (hover tooltips on clipped text)
-        └── stores/          metrics.ts, history.ts, security.ts (Pinia)
+        ├── utils/            format.ts (bytes / duration / percent)
+        └── stores/          metrics.ts, history.ts, security.ts,
+                              maintenance.ts (Pinia)
 ```
 
 ---
@@ -292,6 +302,7 @@ Open **http://localhost:5173** — Vite proxies `/api` and `/ws` to
 |--------|-------------------------------|-------------------------------------------|
 | GET    | `/` (and any non-API path)    | SPA frontend (served from `frontend/dist`) |
 | GET    | `/api/system`                 | Initial system snapshot                   |
+| GET    | `/api/sensors/status`         | LibreHardwareMonitor init status (availability / elevation) |
 | GET    | `/api/history?range=1h|6h|24h`| Bucketed metrics history (~360 points)    |
 | POST   | `/api/speedtest`              | Trigger an Internet speed test            |
 | GET    | `/api/security/suspicious`    | List currently-flagged country codes      |

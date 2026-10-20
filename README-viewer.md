@@ -59,12 +59,12 @@ scripts/
   metrics.py         # 6 metrics + daily history/ snapshots
   export_json.py     # metrics+events → dashboard/data.json (15 sections)
   aggregate.py       # cross-project merge → dashboard/all-projects.json (--projects A,B,C)
-  tools_inventory.py # 24-tool catalog x agent permissions (optional) x actual usage
+  tools_inventory.py # 16-tool catalog x agent permissions (optional) x actual usage
   bootstrap.py       # init .agent/ skeleton (+ --demo sample data)
-  test_logging.py    # 16 tests
+  test_logging.py    # 22 tests
 dashboard/
-  index.html         # single-project view (5 charts + 14 tables)
-  all.html           # cross-project view (6 charts + 12 tables)
+  index.html         # single-project view (5 charts + 17 tables)
+  all.html           # cross-project view (6 charts + 20 tables)
 ```
 
 ## Tool permission tables (optional)
@@ -75,3 +75,7 @@ render a "tool × agent (allowed/denied/actually used)" matrix.
 Without manifests that section stays empty — actual usage still shows fully.
 
 Run tests: `python -m unittest discover -s scripts -p "test_logging.py"`
+
+CI: `.github/workflows/ci.yml` runs the viewer logging tests (`python
+scripts/test_logging.py`) on every push/PR to `master`, alongside the
+backend pytest suite and the frontend build.
