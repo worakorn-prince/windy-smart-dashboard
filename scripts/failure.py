@@ -82,32 +82,37 @@ def analyze(events, toolcalls):
         if r.get("task"):
             call_by_task.setdefault(r.get("task"), []).append(r)
 
+    ev_by_task = {}
+    for e in events:
+        ev_by_task.setdefault(e.get("task"), []).append(e)
+
     tasks = {}
     for tid in task_ids:
         task_calls = call_by_task.get(tid, [])
+        task_events = ev_by_task.get(tid, [])
         failures = []
         for r in task_calls:
             if r.get("status") == "error":
                 failures.append({"time": r.get("time"), "category": classify(r.get("error")),
                                  "detail": str(r.get("error") or "")[:200],
                                  "tool": r.get("tool"), "session_id": r.get("session_id")})
-        for e in events:
-            if e.get("task") == tid and e.get("event") in ("REVIEW_FAILED", "TASK_FAILED"):
+        for e in task_events:
+            if e.get("event") in ("REVIEW_FAILED", "TASK_FAILED"):
                 failures.append({"time": e.get("time"),
                                  "category": classify(e.get("message"), e.get("event")),
                                  "detail": str(e.get("message") or "")[:200],
                                  "tool": None, "session_id": e.get("session_id")})
-            if e.get("task") == tid and e.get("event") == "WORKER_BLOCKED":
+            if e.get("event") == "WORKER_BLOCKED":
                 failures.append({"time": e.get("time"), "category": "BLOCKED",
                                  "detail": str(e.get("message") or "")[:200],
                                  "tool": None, "session_id": e.get("session_id")})
         failures.sort(key=lambda f: str(f.get("time") or ""))
 
         rec_events = sorted(
-            (e for e in events if e.get("task") == tid
-             and e.get("event") in ("RECOVERY_STARTED", "RECOVERY_READY", "WORKER_RESUMED")),
+            (e for e in task_events
+             if e.get("event") in ("RECOVERY_STARTED", "RECOVERY_READY", "WORKER_RESUMED")),
             key=lambda e: str(e.get("time") or ""))
-        done = next((e for e in events if e.get("task") == tid and e.get("event") == "TASK_DONE"), None)
+        done = next((e for e in task_events if e.get("event") == "TASK_DONE"), None)
 
         rec_tokens = 0
         time_to_recovery = None

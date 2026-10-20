@@ -24,20 +24,30 @@ FAILED_EVENTS = ("TASK_FAILED",)
 CANCELLED_EVENTS = ("TASK_CANCELLED", "TASK_CANCELED")
 
 
-def read_jsonl(path):
-    if not os.path.exists(path):
-        return []
+def read_jsonl_stats(path):
     rows = []
+    malformed = 0
+    if not os.path.exists(path):
+        return rows, malformed
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
                 continue
             try:
-                rows.append(json.loads(line))
+                obj = json.loads(line)
             except Exception:
+                malformed += 1
                 continue
-    return rows
+            if not isinstance(obj, dict):
+                malformed += 1
+                continue
+            rows.append(obj)
+    return rows, malformed
+
+
+def read_jsonl(path):
+    return read_jsonl_stats(path)[0]
 
 
 def parse_time(value):
@@ -53,45 +63,72 @@ def _is_excluded_task(task):
     return isinstance(task, str) and (task.startswith("TEST-") or task.startswith("DEP-"))
 
 
-def compute_metrics(events, toolcalls):
-    task_ids = set()
+def compute_metrics(events, toolcalls, malformed_rows=0):
+    ev_by_task = {}
+    done_count = failed_count = cancelled_count = 0
+    session_rows = []
     for e in events:
         t = e.get("task")
+        if not _is_excluded_task(t):
+            ev = e.get("event")
+            if ev == DONE_EVENT:
+                done_count += 1
+            elif ev in FAILED_EVENTS:
+                failed_count += 1
+            elif ev in CANCELLED_EVENTS:
+                cancelled_count += 1
         if t and not _is_excluded_task(t):
-            task_ids.add(t)
+            ev_by_task.setdefault(t, []).append(e)
+        if e.get("event") in SESSION_EVENTS and e.get("agent") and e.get("task") \
+                and not _is_excluded_task(e.get("task")):
+            session_rows.append((e["agent"], e["task"]))
+
+    call_by_task = {}
+    task_ids = set(ev_by_task)
+    aggr = {}
     for r in toolcalls:
         t = r.get("task")
         if t and not _is_excluded_task(t):
             task_ids.add(t)
+            call_by_task.setdefault(t, []).append(r)
+        ag = r.get("agent") or "?"
+        a = aggr.setdefault(ag, {"tasks": set(), "tokens": 0, "calls": 0,
+                                 "denied": 0, "ms": 0.0})
+        if t and not _is_excluded_task(t):
+            a["tasks"].add(t)
+        if r.get("status") == "denied":
+            a["denied"] += 1
+            continue
+        a["calls"] += 1
+        a["tokens"] += int(r.get("tokens_in") or 0) + int(r.get("tokens_out") or 0)
+        if isinstance(r.get("duration_ms"), (int, float)):
+            a["ms"] += r["duration_ms"]
+    for ag, t in session_rows:
+        aggr.setdefault(ag, {"tasks": set(), "tokens": 0,
+                             "calls": 0, "ms": 0.0})["tasks"].add(t)
 
     per_task = {}
-    call_by_task = {}
-    for r in toolcalls:
-        if r.get("task") and not _is_excluded_task(r.get("task")):
-            call_by_task.setdefault(r.get("task"), []).append(r)
     for task in sorted(task_ids):
-        sessions = sum(1 for e in events if e.get("task") == task and e.get("event") in SESSION_EVENTS)
+        task_events = ev_by_task.get(task, [])
         rows = call_by_task.get(task, [])
+        sessions = sum(1 for e in task_events if e.get("event") in SESSION_EVENTS)
         calls = sum(1 for r in rows if r.get("status") != "denied")
         denied = sum(1 for r in rows if r.get("status") == "denied")
-        recoveries = sum(1 for e in events if e.get("task") == task and e.get("event") == RECOVERY_EVENT)
-        loops = sum(1 for e in events if e.get("task") == task and e.get("event") == REVIEW_FAIL_EVENT)
-        created = next((e for e in events if e.get("task") == task and e.get("event") == CREATED_EVENT), None)
-        done = next((e for e in events if e.get("task") == task and e.get("event") == DONE_EVENT), None)
+        recoveries = sum(1 for e in task_events if e.get("event") == RECOVERY_EVENT)
+        loops = sum(1 for e in task_events if e.get("event") == REVIEW_FAIL_EVENT)
+        created = next((e for e in task_events if e.get("event") == CREATED_EVENT), None)
+        done = next((e for e in task_events if e.get("event") == DONE_EVENT), None)
         time_to_done = None
         if created and done:
             t0 = parse_time(created.get("time"))
             t1 = parse_time(done.get("time"))
             if t0 and t1:
                 time_to_done = (t1 - t0).total_seconds()
-        rows = call_by_task.get(task, [])
-        calls = len([r for r in rows if r.get("status") != "denied"])
         tokens = sum(int(r.get("tokens_in") or 0) + int(r.get("tokens_out") or 0) for r in rows)
         fail_times = [parse_time(r.get("time")) for r in rows
                       if r.get("status") == "error" and parse_time(r.get("time"))]
-        fail_times += [parse_time(e.get("time")) for e in events
-                       if e.get("task") == task
-                       and e.get("event") in (REVIEW_FAIL_EVENT, RECOVERY_EVENT)
+        fail_times += [parse_time(e.get("time")) for e in task_events
+                       if e.get("event") in (REVIEW_FAIL_EVENT, RECOVERY_EVENT)
                        and parse_time(e.get("time"))]
         first_fail = min(fail_times) if fail_times else None
         rec_tokens = 0
@@ -100,8 +137,7 @@ def compute_metrics(events, toolcalls):
                 rt = parse_time(r.get("time"))
                 if rt and rt > first_fail:
                     rec_tokens += int(r.get("tokens_in") or 0) + int(r.get("tokens_out") or 0)
-        review_passed = sum(1 for e in events if e.get("task") == task
-                            and e.get("event") == REVIEW_PASS_EVENT)
+        review_passed = sum(1 for e in task_events if e.get("event") == REVIEW_PASS_EVENT)
         per_task[task] = {
             "sessions_per_task": sessions,
             "tool_calls_per_task": calls,
@@ -115,9 +151,6 @@ def compute_metrics(events, toolcalls):
             "denied_attempts": denied
         }
 
-    done_count = sum(1 for e in events if not _is_excluded_task(e.get("task")) and e.get("event") == DONE_EVENT)
-    failed_count = sum(1 for e in events if not _is_excluded_task(e.get("task")) and e.get("event") in FAILED_EVENTS)
-    cancelled_count = sum(1 for e in events if not _is_excluded_task(e.get("task")) and e.get("event") in CANCELLED_EVENTS)
     terminal = done_count + failed_count + cancelled_count
     success_rate = (done_count / terminal) if terminal else 0.0
     totals = {
@@ -133,7 +166,8 @@ def compute_metrics(events, toolcalls):
         "tokens_total": sum(v.get("tokens_total", 0) for v in per_task.values()),
         "denied_attempts": sum(v.get("denied_attempts", 0) for v in per_task.values()),
         "recovery_tokens": sum(v.get("recovery_tokens", 0) for v in per_task.values()),
-        "review_passed": sum(v.get("review_passed", 0) for v in per_task.values())
+        "review_passed": sum(v.get("review_passed", 0) for v in per_task.values()),
+        "malformed_rows": malformed_rows
     }
 
     def _div(a, b):
@@ -153,32 +187,13 @@ def compute_metrics(events, toolcalls):
     done_map = {t: v["done"] for t, v in per_task.items()}
     rec_task_set = {t for t, v in per_task.items()
                     if v["recovery_count"] > 0 or v["recovery_tokens"] > 0}
-    aggr = {}
-    for r in toolcalls:
-        ag = r.get("agent") or "?"
-        a = aggr.setdefault(ag, {"tasks": set(), "tokens": 0, "calls": 0,
-                                 "denied": 0, "ms": 0.0})
-        if r.get("task") and not _is_excluded_task(r.get("task")):
-            a["tasks"].add(r["task"])
-        if r.get("status") == "denied":
-            a["denied"] += 1
-            continue
-        a["calls"] += 1
-        a["tokens"] += int(r.get("tokens_in") or 0) + int(r.get("tokens_out") or 0)
-        if isinstance(r.get("duration_ms"), (int, float)):
-            a["ms"] += r["duration_ms"]
-    for e in events:
-        if e.get("event") in SESSION_EVENTS and e.get("agent") and e.get("task") \
-                and not _is_excluded_task(e.get("task")):
-            aggr.setdefault(e["agent"], {"tasks": set(), "tokens": 0,
-                                         "calls": 0, "ms": 0.0})["tasks"].add(e["task"])
     agent_efficiency = []
     for ag in sorted(aggr):
         a = aggr[ag]
         n = len(a["tasks"])
         n_done = sum(1 for t in a["tasks"] if done_map.get(t))
         agent_efficiency.append({
-            "agent": ag, "tasks": n, "denied": a["denied"],
+            "agent": ag, "tasks": n, "denied": a.get("denied", 0),
             "success_rate": (n_done / n) if n else None,
             "avg_tokens": (a["tokens"] / n) if n else None,
             "avg_tools": (a["calls"] / n) if n else None,
@@ -210,9 +225,10 @@ def save_snapshot(totals):
 
 
 def rebuild(task_filter=None):
-    events = read_jsonl(EVENTS_FILE)
-    toolcalls = read_jsonl(TOOLCALLS_FILE)
-    per_task, totals, efficiency, agent_efficiency = compute_metrics(events, toolcalls)
+    events, events_malformed = read_jsonl_stats(EVENTS_FILE)
+    toolcalls, toolcalls_malformed = read_jsonl_stats(TOOLCALLS_FILE)
+    per_task, totals, efficiency, agent_efficiency = compute_metrics(
+        events, toolcalls, malformed_rows=events_malformed + toolcalls_malformed)
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "totals": totals,
@@ -225,7 +241,8 @@ def rebuild(task_filter=None):
         json.dump(payload, f, indent=2, ensure_ascii=False)
     save_snapshot(totals)
     show = {task_filter: per_task[task_filter]} if task_filter and task_filter in per_task else per_task
-    print(f"Metrics rebuilt: {totals['tasks']} tasks, {totals['tool_calls']} tool calls, success_rate {totals['success_rate']:.2f}")
+    print(f"Metrics rebuilt: {totals['tasks']} tasks, {totals['tool_calls']} tool calls, "
+          f"success_rate {totals['success_rate']:.2f}, malformed_rows {totals['malformed_rows']}")
     if task_filter:
         if task_filter in per_task:
             print(f"Task {task_filter}: {json.dumps(per_task[task_filter], ensure_ascii=False)}")

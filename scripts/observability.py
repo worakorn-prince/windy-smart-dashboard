@@ -29,10 +29,11 @@ from graph import build_graph  # noqa: E402
 from risk import assess as assess_risk, DEFAULT_THRESHOLDS  # noqa: E402
 
 
-def read_jsonl(path):
+def read_jsonl_stats(path):
     rows = []
+    malformed = 0
     if not os.path.exists(path):
-        return rows
+        return rows, malformed
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -40,11 +41,18 @@ def read_jsonl(path):
                 continue
             try:
                 obj = json.loads(line)
-                if isinstance(obj, dict):
-                    rows.append(obj)
             except Exception:
+                malformed += 1
                 continue
-    return rows
+            if isinstance(obj, dict):
+                rows.append(obj)
+            else:
+                malformed += 1
+    return rows, malformed
+
+
+def read_jsonl(path):
+    return read_jsonl_stats(path)[0]
 
 
 def load_json(path, default=None):
@@ -73,8 +81,13 @@ def pick_task(graph, task_id=None):
 
 def build_contract(task_id=None, events=None, toolcalls=None, checkpoint=None,
                    config=None, max_review_cycles=3):
-    events = events if events is not None else read_jsonl(EVENTS_FILE)
-    toolcalls = toolcalls if toolcalls is not None else read_jsonl(TOOLCALLS_FILE)
+    malformed_rows = 0
+    if events is None:
+        events, events_malformed = read_jsonl_stats(EVENTS_FILE)
+        malformed_rows += events_malformed
+    if toolcalls is None:
+        toolcalls, toolcalls_malformed = read_jsonl_stats(TOOLCALLS_FILE)
+        malformed_rows += toolcalls_malformed
     checkpoint = checkpoint if checkpoint is not None else (
         load_json(CHECKPOINT_FILE, default={}) or {})
     config = config if config is not None else (load_json(CONFIG_FILE, default={}) or {})
@@ -96,6 +109,7 @@ def build_contract(task_id=None, events=None, toolcalls=None, checkpoint=None,
         "status": (node.get("terminal", {}).get("state") if node else "unknown"),
         "session": None,
         "recommendations": recommendations,
+        "malformed_rows": malformed_rows,
     }
     if node is None:
         return contract

@@ -17,14 +17,24 @@ projects to also exercise cross-project aggregation.
 
 ## Findings (evidence-based, no guessing)
 
-1. **O(T×N) partitioning blowup** — `graph.build_graph`, `metrics.compute_metrics`
-   and `failure.analyze` re-scanned full row lists per task. 500K calls × 2500
-   tasks never finished (>600s). Fixed with single-pass `task → rows` grouping.
+1. **O(T×N) partitioning blowup** — `graph.build_graph`,
+   `metrics.compute_metrics` and `failure.analyze` re-scanned full row lists
+   per task. 500K calls × 2500 tasks never finished (>600s). All three now
+   build a single-pass `task → rows` index (HARDEN-103 verified
+   `compute_metrics`/`analyze` output is identical before/after except the
+   new `malformed_rows` counter). Measured rebuild on this machine:
+   5K calls 0.19s → 0.17s, 20K calls 0.69s → 0.57s.
 2. **Pretty-print cost** — `json.dump(indent=2)` on a 49MB payload dominated
    export/parse time. `dump_json()` now writes compact JSON above 50K calls
    (~2x faster export, ~2x smaller files, identical content).
 3. **Peak RAM is data-dominated** (~0.7KB/call) and unchanged by the fixes —
    expected: rows stay in memory through the pipeline.
+4. **Silent malformed-row swallowing** (HARDEN-103) — `metrics.read_jsonl`
+   and `observability.read_jsonl` used to skip broken JSONL rows without
+   counting them. Both now count `malformed_rows` (parse failures +
+   non-object rows) and report it in `metrics.json` totals and the
+   observability contract; `metrics.read_jsonl` also filters non-object
+   rows instead of letting them crash `compute_metrics`.
 
 ## Larger scales
 
