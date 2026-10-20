@@ -6,10 +6,13 @@ const store = useSecurityStore()
 const input = ref('')
 const saving = ref(false)
 const lastSaved = ref('')
+const tokenInput = ref('')
+const tokenSaved = ref('')
 
 onMounted(async () => {
   await store.loadSuspicious()
   input.value = store.suspiciousCountries.join(', ')
+  tokenInput.value = store.adminToken
 })
 
 async function save() {
@@ -23,6 +26,19 @@ async function save() {
   lastSaved.value = res.ok ? `Saved ${list.length} countries` : `Failed: ${res.reason || 'unknown'}`
   input.value = store.suspiciousCountries.join(', ')
   setTimeout(() => (lastSaved.value = ''), 4000)
+}
+
+function saveToken() {
+  store.setAdminToken(tokenInput.value.trim())
+  tokenSaved.value = store.adminToken ? 'Token saved (session only)' : 'Token cleared'
+  setTimeout(() => (tokenSaved.value = ''), 4000)
+}
+
+function clearToken() {
+  tokenInput.value = ''
+  store.clearAdminToken()
+  tokenSaved.value = 'Token cleared'
+  setTimeout(() => (tokenSaved.value = ''), 4000)
 }
 </script>
 
@@ -46,6 +62,30 @@ async function save() {
       <span class="muted small" v-if="lastSaved">{{ lastSaved }}</span>
     </div>
   </div>
+
+  <div class="card settings-card">
+    <h3>Admin Token</h3>
+    <p class="muted small">
+      Required when the backend runs with <span class="kbd">DASH_ADMIN_TOKEN</span> set.
+      Kill / Block / Unblock send it as the <span class="kbd">X-Admin-Token</span> header.
+      Stored in sessionStorage only — it is cleared when this tab closes.
+    </p>
+    <input
+      v-model="tokenInput"
+      type="password"
+      placeholder="admin token"
+      class="input"
+      autocomplete="off"
+      @keyup.enter="saveToken"
+    />
+    <div class="actions">
+      <button class="primary" @click="saveToken">Save Token</button>
+      <button v-if="store.adminToken" @click="clearToken">Clear</button>
+      <span class="muted small" v-if="store.adminToken">✓ token set</span>
+      <span class="warn small" v-else>no token — actions may fail with 401</span>
+      <span class="muted small" v-if="tokenSaved">{{ tokenSaved }}</span>
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -54,5 +94,7 @@ async function save() {
   color: var(--text); border: 1px solid var(--border); border-radius: 6px;
   font-family: monospace; font-size: 13px;
 }
-.actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.warn { color: var(--warn); }
+.settings-card + .settings-card { margin-top: 12px; }
 </style>

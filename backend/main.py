@@ -83,6 +83,20 @@ sec_mon: sec_monitor.SecurityMonitor | None = None
 suspicious_countries_state: list[str] = list(config.DEFAULT_SUSPICIOUS_COUNTRIES)
 
 
+def security_event_payload(evt: sec_monitor.Event) -> dict[str, Any]:
+    """Canonical WS payload for live security events.
+
+    The event's own data (including its event type such as "port_opened")
+    lives under "event"; the envelope type is always "security_event" so
+    the frontend can route every message uniformly.
+    """
+    return {"type": "security_event", "event": evt.to_dict()}
+
+
+async def broadcast_security_event(evt: sec_monitor.Event) -> None:
+    await manager.broadcast("security", security_event_payload(evt))
+
+
 def load_suspicious() -> None:
     global suspicious_countries_state
     p = config.CACHE_DIR / "suspicious.json"
@@ -111,10 +125,8 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("sensor startup log skipped")
 
-    async def _sec_emit(evt) -> None:
-        await manager.broadcast("security", {"type": "security_event", **evt.to_dict()})
-
-    sec_mon = sec_monitor.SecurityMonitor(on_event=_sec_emit, suspicious=list(suspicious_countries_state))
+    sec_mon = sec_monitor.SecurityMonitor(on_event=broadcast_security_event,
+                                          suspicious=list(suspicious_countries_state))
     await sec_mon.start()
 
     metrics_task = asyncio.create_task(_metrics_loop())
@@ -367,7 +379,7 @@ async def api_blocked() -> dict[str, Any]:
 
 @app.post("/api/security/export")
 async def api_export(payload: dict[str, Any]) -> Response:
-    fmt = (payload.get("fmt") or "json").lower()
+    fmt = str(payload.get("fmt") or "json").lower()
     report_payload = payload.get("report")
     if not isinstance(report_payload, dict):
         return Response(json.dumps({"ok": False, "reason": "missing report"}),
@@ -375,8 +387,8 @@ async def api_export(payload: dict[str, Any]) -> Response:
     from exporters import save
     try:
         path = save(report_payload, fmt)
-    except ValueError as exc:
-        return Response(json.dumps({"ok": False, "reason": str(exc)}),
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+        return Response(json.dumps({"ok": False, "reason": f"invalid report: {exc}"}),
                         status_code=400, media_type="application/json")
     data = Path(path).read_bytes()
     media_types = {
