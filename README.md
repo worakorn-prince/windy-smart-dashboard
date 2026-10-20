@@ -346,6 +346,7 @@ folders and the recycle bin.
 | GET | `/api/maintenance/status` | Cached system + scanner status |
 | GET | `/api/maintenance/scan?refresh=1` | Device/driver scan (`refresh=1` bypasses the 30 s cache) |
 | GET | `/api/maintenance/history?limit=100` | Recent rows from the `maintenance_actions` table (SQLite `HISTORY_DB`) |
+| GET | `/api/maintenance/clean/summary` | Read-only size preview per cleanup target (`categories`, `totalBytes`) |
 | POST | `/api/maintenance/action` | `{action}` → `wu-scan` or `pnputil-scan` |
 | POST | `/api/maintenance/clean` | `{targets, confirm:true}` → `user-temp`, `windows-temp`, `recycle-bin` |
 | POST | `/api/maintenance/export` | `{kind, format}` → devices/history × csv/json |

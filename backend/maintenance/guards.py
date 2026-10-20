@@ -1,9 +1,14 @@
 """Security guards for the maintenance module: host allowlist + CSRF check."""
 from __future__ import annotations
 
+import os
+
 from fastapi import HTTPException, Request
 
-ALLOWED_HOSTS = {"127.0.0.1", "localhost", "::1", "testserver"}
+ALLOWED_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+TEST_HOST = "testserver"
+TEST_MODE_ENV = "DASH_TEST_MODE"
 
 CSRF_HEADER = "X-Requested-With"
 CSRF_VALUE = "windy-dashboard"
@@ -26,8 +31,19 @@ def split_host(value: str | None) -> str:
     return raw
 
 
+def _allowed_hosts() -> set[str]:
+    """Production allowlist plus `testserver` only while `DASH_TEST_MODE=1`.
+
+    The env is read per call so importing order never decides the policy.
+    """
+    hosts = set(ALLOWED_HOSTS)
+    if (os.environ.get(TEST_MODE_ENV) or "").strip() == "1":
+        hosts.add(TEST_HOST)
+    return hosts
+
+
 def require_allowed_host(request: Request) -> None:
-    if split_host(request.headers.get("host")) not in ALLOWED_HOSTS:
+    if split_host(request.headers.get("host")) not in _allowed_hosts():
         raise HTTPException(status_code=403, detail=HOST_FORBIDDEN_DETAIL)
 
 

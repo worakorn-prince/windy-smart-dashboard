@@ -46,9 +46,35 @@ export interface HistoryEntry {
   [key: string]: unknown
 }
 
+export interface CleanSummaryCategory {
+  target?: string
+  path?: string
+  bytes?: number
+  [key: string]: unknown
+}
+
+export interface CleanSummary {
+  ok: boolean
+  categories: CleanSummaryCategory[]
+  totalBytes: number
+  durationMs: number
+}
+
+export interface CleanResult {
+  message?: string
+  bytesFreed?: number
+  durationMs?: number
+  targets: string[]
+}
+
 interface HttpError extends Error {
   status?: number
   code?: string
+}
+
+function toNumber(value: unknown): number | undefined {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : undefined
 }
 
 function httpError(message: string, status: number, code?: string): HttpError {
@@ -77,6 +103,13 @@ function apiError(data: any, status: number): string {
   const message = String(data?.message ?? data?.reason ?? '').trim()
   if (message) return message
   return `คำขอไม่สำเร็จ (HTTP ${status})`
+}
+
+function adminErrorMessage(data: any, status: number, code: string): string {
+  if (status === 401) return ADMIN_TOKEN_HINT
+  const label = code || 'ADMIN_REQUIRED'
+  const text = apiError(data, status)
+  return `ต้องใช้สิทธิ์ผู้ดูแล (HTTP 403 · ${label}): ${text} — กรุณารันเซิร์ฟเวอร์แบบ elevated (Run as administrator) หรือถ้าเปิดผ่าน host ที่ไม่ใช่ localhost ให้ตั้งค่า token ใน localStorage "${ADMIN_TOKEN_KEY}" แล้วโหลดหน้าใหม่`
 }
 
 function readAdminToken(): string | null {
@@ -128,6 +161,10 @@ export const useMaintenanceStore = defineStore('maintenance', () => {
   const notice = ref('')
   const history = ref<HistoryEntry[]>([])
   const busy = ref<string | null>(null)
+  const cleanSummary = ref<CleanSummary | null>(null)
+  const summaryLoading = ref(false)
+  const summaryError = ref('')
+  const lastClean = ref<CleanResult | null>(null)
 
   const isAdmin = computed(() => Boolean(system.value?.isAdmin))
   const hasIssues = computed(() => (counts.value?.issues ?? 0) > 0)
@@ -287,19 +324,79 @@ export const useMaintenanceStore = defineStore('maintenance', () => {
     }
   }
 
-  async function runClean(targets: string[]) {
+  async function loadCleanSummary() {
+    summaryLoading.value = true
+    summaryError.value = ''
+    try {
+      const resp = await fetch('/api/maintenance/clean/summary', { headers: authHeaders() })
+      const data: any = await resp.json().catch(() => null)
+      const code = String(data?.detail?.code ?? data?.code ?? '')
+
+      if (resp.status === 401 || resp.status === 403) {
+        throw httpError(ADMIN_TOKEN_HINT, resp.status, code || 'ADMIN_REQUIRED')
+      }
+
+      if (resp.status === 404 || resp.status === 405 || resp.status === 501) {
+        cleanSummary.value = null
+        summaryError.value = 'ยังไม่มีข้อมูลขนาดไฟล์จากเซิร์ฟเวอร์ (endpoint สรุปยังไม่พร้อมใช้งาน)'
+        return null
+      }
+
+      if (!resp.ok || !data) {
+        throw httpError(apiError(data, resp.status), resp.status, code)
+      }
+
+      const payload: any = data.summary ?? data.data ?? data
+      const list: CleanSummaryCategory[] = Array.isArray(payload?.categories)
+        ? payload.categories.map((item: any) => ({
+            target: String(item?.target ?? item?.name ?? ''),
+            path: String(item?.path ?? ''),
+            bytes: toNumber(item?.bytes ?? item?.size ?? 0) ?? 0,
+          }))
+        : []
+      const reportedTotal = toNumber(payload?.totalBytes)
+      const summedTotal = list.reduce((sum, item) => sum + (item.bytes ?? 0), 0)
+
+      cleanSummary.value = {
+        ok: payload?.ok !== false,
+        categories: list,
+        totalBytes: reportedTotal ?? summedTotal,
+        durationMs: toNumber(payload?.durationMs) ?? 0,
+      }
+      return cleanSummary.value
+    } catch (err) {
+      cleanSummary.value = null
+      summaryError.value = errMessage(err, 'โหลดขนาดไฟล์ก่อนล้างไม่สำเร็จ')
+      return null
+    } finally {
+      summaryLoading.value = false
+    }
+  }
+
+  async function runClean(targets: string[], confirm: boolean) {
     if (!targets.length) {
       error.value = 'กรุณาเลือกเป้าหมายที่ต้องการล้างอย่างน้อยหนึ่งรายการ'
+      return null
+    }
+    if (!confirm) {
+      error.value = 'ต้องยืนยันการล้างไฟล์จากหน้าจอก่อนดำเนินการ'
       return null
     }
     busy.value = 'clean'
     error.value = ''
     notice.value = ''
     try {
-      const res = await postJson<any>('/api/maintenance/clean', { targets, confirm: true })
+      const res = await postJson<any>('/api/maintenance/clean', { targets, confirm })
       if (!res) return null
       notice.value = String(res.message ?? res.reason ?? `ล้างไฟล์เรียบร้อย (${targets.length} เป้าหมาย)`)
-      await loadStatus()
+      lastClean.value = {
+        message: notice.value,
+        bytesFreed:
+          toNumber(res.bytesFreed ?? res.bytes_freed ?? res.freedBytes ?? res.freed_bytes) ?? 0,
+        durationMs: toNumber(res.durationMs ?? res.duration_ms ?? res.elapsedMs ?? res.elapsed_ms) ?? 0,
+        targets: [...targets],
+      }
+      await Promise.all([loadStatus(), loadCleanSummary()])
       return res
     } catch (err) {
       error.value = errMessage(err, 'ล้างไฟล์ไม่สำเร็จ')
@@ -321,18 +418,19 @@ export const useMaintenanceStore = defineStore('maintenance', () => {
       })
 
       if (resp.status === 401 || resp.status === 403) {
-        throw httpError(ADMIN_TOKEN_HINT, resp.status, 'UNAUTHORIZED')
+        const data: any = await resp.json().catch(() => null)
+        const code = String(data?.detail?.code ?? data?.code ?? '')
+        throw httpError(adminErrorMessage(data, resp.status, code), resp.status, code || 'ADMIN_REQUIRED')
       }
 
       if (!resp.ok) {
-        let message = `ดาวน์โหลดไม่สำเร็จ (HTTP ${resp.status})`
+        let data: any = null
         try {
-          const data: any = await resp.json()
-          message = String(data?.message ?? data?.reason ?? message)
+          data = await resp.json()
         } catch {
-          // Non-JSON error body, keep the generic message.
+          data = null
         }
-        throw httpError(message, resp.status)
+        throw httpError(apiError(data, resp.status), resp.status, String(data?.detail?.code ?? data?.code ?? ''))
       }
 
       const blob = await resp.blob()
@@ -368,11 +466,16 @@ export const useMaintenanceStore = defineStore('maintenance', () => {
     notice,
     history,
     busy,
+    cleanSummary,
+    summaryLoading,
+    summaryError,
+    lastClean,
     isAdmin,
     hasIssues,
     loadStatus,
     loadScan,
     loadHistory,
+    loadCleanSummary,
     runAction,
     runClean,
     downloadExport,

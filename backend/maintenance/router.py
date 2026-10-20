@@ -20,7 +20,7 @@ from .scanner import scan
 from .system import system_info
 
 MODULE_NAME = "maintenance"
-MODULE_VERSION = "0.3.0"
+MODULE_VERSION = "0.3.1"
 MODULE_STAGE = "write"
 
 RELAUNCH_DISABLED = "RELAUNCH_DISABLED"
@@ -153,6 +153,16 @@ async def action(payload: dict[str, Any] | None = Body(default=None)) -> dict[st
         return await actions.run_action(str(data.get("action") or ""))
     except actions.ActionError as exc:
         raise _write_error("action", exc) from exc
+
+
+@router.get("/clean/summary", dependencies=[_ALLOWED_HOST])
+async def clean_summary() -> dict[str, Any]:
+    try:
+        return await cleaner.summary()
+    except cleaner.CleanError as exc:
+        raise _write_error("clean-summary", exc) from exc
+    except Exception as exc:
+        raise _read_error("clean-summary", exc) from exc
 
 
 @router.post("/clean", dependencies=_WRITE_GUARDS)

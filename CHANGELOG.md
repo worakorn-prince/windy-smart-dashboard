@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-10-20
+
+### Added
+
+- `GET /api/maintenance/clean/summary` — read-only size preview for `user-temp`, `windows-temp`, and `recycle-bin` (`categories`, `totalBytes`, `durationMs`) with a `clean-summary` history row.
+- "Size before cleanup" card on `/maintenance` (per-target path + size, total, refresh) and a "clean all" button that still requires the existing confirmation step.
+- `frontend/src/utils/format.ts` (`formatBytes`, `formatDuration`, `formatPercent`) used for memory, disk, freed bytes, and durations.
+
+### Changed
+
+- `/maintenance` now renders memory/disk as human-readable values (`12.3 GB / 31.2 GB (39%)`) instead of raw bytes.
+- `downloadExport` surfaces `detail.code` / `text` / `hint` and explains `403` admin/host failures; `runClean(targets, confirm)` takes the confirmation from the caller instead of hard-coding `confirm: true` in the store.
+
+### Security
+
+- CSV export neutralizes spreadsheet formula injection: cells starting with `=`, `+`, `-`, `@`, tab, or CR get a leading `'`.
+- `testserver` is no longer part of the production host allowlist; it is accepted only while `DASH_TEST_MODE=1` (set by `tests/conftest.py`).
+
 ## [0.3.0] - 2026-10-20
 
 ### Added

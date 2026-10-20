@@ -37,9 +37,18 @@ HISTORY_HEADER: tuple[str, ...] = (
 CSV_MEDIA_TYPE = "text/csv; charset=utf-8"
 JSON_MEDIA_TYPE = "application/json"
 
+_INJECTION_PREFIXES: tuple[str, ...] = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _neutralize(text: str) -> str:
+    """Prefix a single quote when a cell could be read as a spreadsheet formula."""
+    if text.startswith(_INJECTION_PREFIXES):
+        return "'" + text
+    return text
+
 
 def _csv_cell(value: Any) -> str:
-    text = "" if value is None else str(value)
+    text = _neutralize("" if value is None else str(value))
     if any(ch in text for ch in (",", '"', "\r", "\n")):
         return '"' + text.replace('"', '""') + '"'
     return text

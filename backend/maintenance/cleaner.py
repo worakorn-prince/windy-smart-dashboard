@@ -16,10 +16,12 @@ from .powershell import run_powershell
 ALLOWED_TARGETS: tuple[str, ...] = ("user-temp", "windows-temp", "recycle-bin")
 
 CLEAN_TIMEOUT = 120.0
+SUMMARY_TIMEOUT = 90.0
 
 CONFIRM_REQUIRED = "CONFIRM_REQUIRED"
 INVALID_TARGETS = "INVALID_TARGETS"
 CLEAN_FAILED = "CLEAN_FAILED"
+SUMMARY_FAILED = "SUMMARY_FAILED"
 
 CLEAN_USER_TEMP_SCRIPT = (
     "$ErrorActionPreference='SilentlyContinue';"
@@ -50,6 +52,31 @@ CLEAN_RECYCLE_SCRIPT = (
     "@{filesDeleted=0;filesSkipped=0;bytesFreed=$before} | ConvertTo-Json -Compress"
 )
 
+SUMMARY_SCRIPT = (
+    "$ErrorActionPreference='SilentlyContinue';"
+    "$out=@();"
+    "$ut=$env:TEMP;"
+    "if($ut){"
+    "$m=Get-ChildItem -LiteralPath $ut -Recurse -Force -File -ErrorAction SilentlyContinue"
+    " | Measure-Object -Property Length -Sum;"
+    "$b=[long]0;if($m.Sum){$b=[long]$m.Sum};"
+    "$out+=[pscustomobject]@{target='user-temp';path=$ut;bytes=$b}};"
+    "$wt=Join-Path $env:SystemRoot 'Temp';"
+    "if($wt){"
+    "$m=Get-ChildItem -LiteralPath $wt -Recurse -Force -File -ErrorAction SilentlyContinue"
+    " | Measure-Object -Property Length -Sum;"
+    "$b=[long]0;if($m.Sum){$b=[long]$m.Sum};"
+    "$out+=[pscustomobject]@{target='windows-temp';path=$wt;bytes=$b}};"
+    "foreach($d in (Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue)){"
+    "$rp=Join-Path $d.Root '$Recycle.Bin';"
+    "if(Test-Path -LiteralPath $rp){"
+    "$m=Get-ChildItem -LiteralPath $rp -Recurse -Force -File -ErrorAction SilentlyContinue"
+    " | Measure-Object -Property Length -Sum;"
+    "$b=[long]0;if($m.Sum){$b=[long]$m.Sum};"
+    "$out+=[pscustomobject]@{target='recycle-bin';path=$rp;bytes=$b}}};"
+    "ConvertTo-Json -InputObject @($out) -Compress"
+)
+
 CLEAN_SCRIPTS: dict[str, str] = {
     "user-temp": CLEAN_USER_TEMP_SCRIPT,
     "windows-temp": CLEAN_WINDOWS_TEMP_SCRIPT,
@@ -60,11 +87,13 @@ _TEXT = {
     CONFIRM_REQUIRED: "ต้องยืนยันก่อนลบไฟล์ (confirm=true)",
     INVALID_TARGETS: "targets ไม่ถูกต้อง",
     CLEAN_FAILED: "ลบไฟล์ไม่สำเร็จ",
+    SUMMARY_FAILED: "อ่านขนาดไฟล์ไม่สำเร็จ",
 }
 _HINT = {
     CONFIRM_REQUIRED: "ส่ง confirm=true มาพร้อม targets เพื่อยืนยันการลบ",
     INVALID_TARGETS: "อนุญาตเฉพาะ " + ", ".join(ALLOWED_TARGETS),
     CLEAN_FAILED: "ตรวจสอบสิทธิ์ผู้ดูแลระบบและลองใหม่อีกครั้ง",
+    SUMMARY_FAILED: "ตรวจสอบว่า PowerShell ใช้งานได้ แล้วลองใหม่อีกครั้ง",
 }
 
 
@@ -224,3 +253,58 @@ async def clean(targets: list[str], *, confirm: bool) -> dict[str, Any]:
     if errors:
         body["errors"] = errors
     return body
+
+
+async def summary() -> dict[str, Any]:
+    """Report how much space the cleanup targets currently occupy (read-only)."""
+    started = time.perf_counter()
+    try:
+        raw = await run_powershell(SUMMARY_SCRIPT, timeout=SUMMARY_TIMEOUT)
+        rows = _rows(raw)
+    except Exception as exc:
+        history.record(
+            "clean-summary",
+            ok=False,
+            duration_ms=_duration_ms(started),
+            error=SUMMARY_FAILED,
+        )
+        raise CleanError(
+            SUMMARY_FAILED,
+            status_code=502,
+            text="อ่านขนาดไฟล์ไม่สำเร็จ: " + str(exc),
+        ) from exc
+
+    categories: list[dict[str, Any]] = []
+    index: dict[str, int] = {}
+    total = 0
+    for row in rows:
+        target = str(row.get("target") or "").strip()
+        path = str(row.get("path") or "").strip()
+        try:
+            size = max(0, int(row.get("bytes") or 0))
+        except (TypeError, ValueError):
+            size = 0
+        key = target or path
+        if not key:
+            continue
+        if key in index:
+            categories[index[key]]["bytes"] += size
+            total += size
+            continue
+        index[key] = len(categories)
+        categories.append({"target": target, "path": path, "bytes": size})
+        total += size
+
+    duration = _duration_ms(started)
+    history.record(
+        "clean-summary",
+        ok=True,
+        duration_ms=duration,
+        detail={"totalBytes": total, "categories": len(categories)},
+    )
+    return {
+        "ok": True,
+        "categories": categories,
+        "totalBytes": total,
+        "durationMs": duration,
+    }

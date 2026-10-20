@@ -248,8 +248,8 @@ frontend/src/
 
 ## Implementation notes & deviations
 
-สถานะจริง: implemented (MERGE-001..006a) — parity test `tests/test_parity_updater.py`
-ผ่าน และ `python -m pytest tests -q` = **87 passed**
+สถานะจริง: implemented (MERGE-001..006a + HARDEN-001/002) — parity test `tests/test_parity_updater.py`
+ผ่าน และ `python -m pytest tests -q` = **92 passed**, `npm run build` = 124 modules
 
 ความต่างจาก updater เดิม 8 ข้อ (เจตนา):
 
@@ -258,9 +258,18 @@ frontend/src/
 3. `relaunch` ปิดถาวร → `501 RELAUNCH_DISABLED`
 4. เพิ่ม `GET /api/maintenance/history` (updater เดิมไม่มี)
 5. History เก็บใน SQLite ตาราง `maintenance_actions` (`HISTORY_DB`) ไม่ใช่ JSON
-6. Cleanup ไม่มี endpoint สรุปขนาดแยก ใช้ `/clean` เท่านั้น (dead code ถูกถอดใน MERGE-006a)
+6. ~~Cleanup ไม่มี endpoint สรุปขนาดแยก~~ → **แก้ไขใน HARDEN-001**: คืน `GET /api/maintenance/clean/summary` (read-only, ไม่ลบไฟล์) เพื่อให้ผู้ใช้เห็นขนาดก่อนกดล้าง
 7. **ชื่อฟิลด์ response เปลี่ยน**: `device` → `name`, `errorCode` → `problemCode` และเพิ่ม `class` (ค่าคงที่ `"driver"`) เพื่อเข้ากับรูปแบบ store ฝั่ง Vue
 8. Export สร้าง CSV/JSON ในหน่วยความจำ (BOM + CRLF) — ไม่ใช้ `backend/exporters/` และไม่เขียนไฟล์ลงดิสก์
+
+เพิ่มเติมจากงาน HARDEN-001/002 (หลังรีวิว MERGE-006):
+
+9. **CSV formula injection** — ช่องที่ขึ้นต้นด้วย `=`, `+`, `-`, `@`, tab หรือ CR จะถูกเติม `'` ข้างหน้า
+   ก่อน CSV escaping (`export._neutralize`) เพื่อกันการเปิดไฟล์ใน Excel แล้วรันสูตร
+10. **`testserver` ไม่อยู่ใน production allowlist** — อนุญาตเฉพาะเมื่อ env `DASH_TEST_MODE=1`
+    (`guards._allowed_hosts()` อ่าน env ทุกครั้งที่เรียก ไม่ผูกกับลำดับ import)
+11. **UX หน้า `/maintenance`** — RAM/ดิสก์/ขนาดขยะแสดงเป็นหน่วยอ่านง่าย (`utils/format.ts`),
+    มีส่วน "ขนาดขยะก่อนล้าง" จาก `clean/summary`, และข้อความ 403 แยกกรณี admin/host ชัดเจน
 
 Mapping ไฟล์จริง:
 
@@ -274,7 +283,7 @@ Mapping ไฟล์จริง:
 | Cleaner (`user-temp`, `windows-temp`, `recycle-bin`) | `backend/maintenance/cleaner.py` |
 | History (SQLite `maintenance_actions`) | `backend/maintenance/history.py` |
 | Export (CSV/JSON) | `backend/maintenance/export.py` |
-| Router (7 endpoints) | `backend/maintenance/router.py` |
+| Router (8 endpoints) | `backend/maintenance/router.py` |
 | Frontend route + หน้า | `frontend/src/main.ts`, `frontend/src/pages/Maintenance.vue` |
 | Components | `frontend/src/components/maintenance/{MaintenanceTable,MaintenancePanel,MaintenanceHistory,MaintenanceAdminBanner}.vue` |
 | Store | `frontend/src/stores/maintenance.ts` |

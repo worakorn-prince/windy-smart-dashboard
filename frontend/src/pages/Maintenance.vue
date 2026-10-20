@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useMaintenanceStore } from '@/stores/maintenance'
+import { formatBytes, formatPercent } from '@/utils/format'
 import MaintenanceAdminBanner from '@/components/maintenance/MaintenanceAdminBanner.vue'
 import MaintenancePanel from '@/components/maintenance/MaintenancePanel.vue'
 import MaintenanceTable from '@/components/maintenance/MaintenanceTable.vue'
@@ -21,18 +22,58 @@ function text(value: unknown): string {
   }
 }
 
+function pickNumber(o: Record<string, any>, keys: string[]): number | null {
+  for (const key of keys) {
+    const raw = o[key]
+    if (raw === null || raw === undefined || raw === '') continue
+    const n = Number(raw)
+    if (Number.isFinite(n)) return n
+  }
+  return null
+}
+
+function bytesOf(
+  o: Record<string, any>,
+  byteKeys: string[],
+  gbKeys: string[],
+  genericKeys: string[],
+): number | null {
+  const direct = pickNumber(o, byteKeys)
+  if (direct !== null) return direct
+  const gb = pickNumber(o, gbKeys)
+  if (gb !== null) return gb * 1024 ** 3
+  const generic = pickNumber(o, genericKeys)
+  if (generic === null) return null
+  return generic >= 1048576 ? generic : generic * 1024 ** 3
+}
+
+function percentText(part: number | null, total: number | null, rawPct: number | null): string {
+  if (rawPct !== null) return formatPercent(rawPct, 100)
+  if (part !== null && total !== null) return formatPercent(part, total)
+  return ''
+}
+
 function memoryText(value: unknown): string {
   if (value === null || value === undefined || value === '') return '—'
   if (typeof value !== 'object') return String(value)
   const o = value as Record<string, any>
-  const total = o.total ?? o.totalGB ?? o.TotalGB ?? o.totalBytes
-  const free = o.free ?? o.freeGB ?? o.FreeGB ?? o.available
-  const pct = o.usedPercent ?? o.used_pct ?? o.percent ?? o.loadPercent
-  const parts: string[] = []
-  if (total !== undefined) parts.push(`total ${total}`)
-  if (free !== undefined) parts.push(`free ${free}`)
-  if (pct !== undefined) parts.push(`used ${pct}`)
-  return parts.length ? parts.join(' · ') : text(value)
+  const total = bytesOf(o, ['totalBytes', 'total_bytes'], ['totalGB', 'TotalGB', 'totalGb', 'TotalGb'], ['total', 'Total'])
+  const used = bytesOf(o, ['usedBytes', 'used_bytes'], ['usedGB', 'UsedGB', 'usedGb'], ['used', 'Used'])
+  const free = bytesOf(
+    o,
+    ['freeBytes', 'free_bytes', 'availableBytes', 'available_bytes'],
+    ['freeGB', 'FreeGB', 'availableGB', 'availableGb'],
+    ['free', 'Free', 'available'],
+  )
+  const usedBytes = used ?? (total !== null && free !== null ? total - free : null)
+  const pct = percentText(usedBytes, total, pickNumber(o, ['usedPercent', 'used_pct', 'percent', 'loadPercent']))
+  if (total !== null && usedBytes !== null) {
+    return `ใช้ ${formatBytes(usedBytes)} / ${formatBytes(total)}${pct ? ` (${pct})` : ''}`
+  }
+  if (total !== null && free !== null) {
+    return `ว่าง ${formatBytes(free)} / ${formatBytes(total)}${pct ? ` (${pct})` : ''}`
+  }
+  return text(value)
 }
 
 function diskText(value: unknown): string {
@@ -40,13 +81,23 @@ function diskText(value: unknown): string {
   if (typeof value !== 'object') return String(value)
   const o = value as Record<string, any>
   const name = o.drive ?? o.name ?? o.letter ?? o.device ?? o.mount ?? ''
-  const free = o.free ?? o.freeGB ?? o.FreeGB ?? o.available
-  const total = o.total ?? o.totalGB ?? o.TotalGB ?? o.size
-  const pct = o.usedPercent ?? o.used_pct ?? o.percent
+  const total = bytesOf(
+    o,
+    ['totalBytes', 'total_bytes', 'sizeBytes', 'size_bytes'],
+    ['totalGB', 'TotalGB', 'sizeGB'],
+    ['total', 'Total', 'size'],
+  )
+  const free = bytesOf(
+    o,
+    ['freeBytes', 'free_bytes', 'availableBytes', 'available_bytes'],
+    ['freeGB', 'FreeGB', 'availableGB', 'availableGb'],
+    ['free', 'Free', 'available'],
+  )
+  const pct = percentText(free, total, pickNumber(o, ['freePercent', 'free_pct']))
   const parts: string[] = []
   if (name) parts.push(String(name))
-  if (total !== undefined && free !== undefined) parts.push(`${free}/${total} GB`)
-  if (pct !== undefined) parts.push(`${pct}% used`)
+  if (total !== null && free !== null) parts.push(`ว่าง ${formatBytes(free)} / ${formatBytes(total)}${pct ? ` (${pct})` : ''}`)
+  else if (total !== null) parts.push(formatBytes(total))
   return parts.length ? parts.join(' · ') : text(value)
 }
 
@@ -77,11 +128,11 @@ onMounted(() => {
     <MaintenanceAdminBanner />
 
     <div v-if="store.error" class="banner error" role="alert">
-      <span>⚠️ {{ store.error }}</span>
+      <span>{{ store.error }}</span>
       <button class="btn tiny" @click="store.error = ''">ปิด</button>
     </div>
     <div v-if="store.notice" class="banner notice" role="status">
-      <span>ℹ️ {{ store.notice }}</span>
+      <span>{{ store.notice }}</span>
       <button class="btn tiny" @click="store.notice = ''">ปิด</button>
     </div>
 
