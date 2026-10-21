@@ -20,6 +20,7 @@ import aggregate as aggregate_mod
 import tools_inventory as tools_mod
 import watch as watch_mod
 import compare as compare_mod
+import cost as cost_mod
 
 
 REQUIRED_TOOLCALL_FIELDS = {
@@ -926,6 +927,173 @@ class TestCompare(unittest.TestCase):
             with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
                 self.assertEqual(
                     compare_mod.main(["--base", bad, "--cand", roots[0]]), 2)
+
+
+class TestCost(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = os.path.join(self.tmp.name, "proj")
+        self.mgr = os.path.join(self.root, ".agent", "manager")
+        os.makedirs(self.mgr)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _write(self, name, rows, extra_lines=None):
+        path = os.path.join(self.mgr, name)
+        with open(path, "w", encoding="utf-8") as f:
+            for row in rows:
+                f.write(json.dumps(row) + "\n")
+            for line in extra_lines or []:
+                f.write(line + "\n")
+        return path
+
+    def _run(self, args):
+        out, err = StringIO(), StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = cost_mod.main(args)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_cost_aggregate_models_and_skipped(self):
+        self._write("tool-calls.jsonl", [
+            {"model": "gpt-4o", "tokens_in": 1000, "tokens_out": 500},
+            {"model": "gpt-4o", "tokens_in": 2000, "tokens_out": 1000},
+            {"model": "gpt-4o-mini", "tokens_in": 3000, "tokens_out": 0},
+            {"model": "mystery-model", "tokens_in": 100, "tokens_out": 50},
+            {"tokens_in": 10, "tokens_out": 5},
+            {"model": "gpt-4o"},
+            {"model": "gpt-4o", "tokens_in": None, "tokens_out": None},
+        ], extra_lines=["{not-json"])
+        self._write("events.jsonl", [
+            {"event": "USAGE", "model": "gpt-4o-mini",
+             "tokens_in": 1000, "tokens_out": 1000},
+        ])
+
+        result = cost_mod.aggregate(self.root)
+        self.assertEqual(result["skipped"], 4)
+        by_model = {row["model"]: row for row in result["models"]}
+        self.assertEqual([row["model"] for row in result["models"]],
+                         ["gpt-4o", "gpt-4o-mini", "mystery-model"])
+
+        gpt4o = by_model["gpt-4o"]
+        self.assertEqual(gpt4o["calls"], 2)
+        self.assertEqual(gpt4o["tokens_in"], 3000)
+        self.assertEqual(gpt4o["tokens_out"], 1500)
+        self.assertEqual(gpt4o["tokens_total"], 4500)
+        self.assertAlmostEqual(gpt4o["est_cost_usd"], 0.0225)
+
+        mini = by_model["gpt-4o-mini"]
+        self.assertEqual(mini["calls"], 2)
+        self.assertEqual(mini["tokens_in"], 4000)
+        self.assertEqual(mini["tokens_out"], 1000)
+        self.assertEqual(mini["tokens_total"], 5000)
+        self.assertAlmostEqual(mini["est_cost_usd"], 0.0012)
+
+        mystery = by_model["mystery-model"]
+        self.assertEqual(mystery["calls"], 1)
+        self.assertEqual(mystery["tokens_total"], 150)
+        self.assertIsNone(mystery["est_cost_usd"])
+
+        total = result["total"]
+        self.assertEqual(total["calls"], 5)
+        self.assertEqual(total["tokens_total"], 9650)
+        self.assertAlmostEqual(total["est_cost_usd"], 0.0237)
+        self.assertEqual(total["unknown_models"], ["mystery-model"])
+        self.assertTrue(total["partial_cost"])
+
+    def test_cost_pricing_override(self):
+        self._write("tool-calls.jsonl", [
+            {"model": "custom-model", "tokens_in": 1_000_000,
+             "tokens_out": 500_000},
+        ])
+        prices = os.path.join(self.tmp.name, "prices.json")
+        with open(prices, "w", encoding="utf-8") as f:
+            json.dump({"custom-model": {"input": 1.0, "output": 2.0}}, f)
+        code, out, _ = self._run(
+            ["--root", self.root, "--pricing", prices, "--json"])
+        self.assertEqual(code, 0)
+        payload = json.loads(out)
+        self.assertEqual(payload["models"][0]["model"], "custom-model")
+        self.assertAlmostEqual(payload["models"][0]["est_cost_usd"], 2.0)
+
+        direct = cost_mod.aggregate(
+            self.root, pricing={"custom-model": [3, 6]})
+        self.assertAlmostEqual(direct["models"][0]["est_cost_usd"], 6.0)
+
+        bad_prices = os.path.join(self.tmp.name, "bad-prices.json")
+        with open(bad_prices, "w", encoding="utf-8") as f:
+            json.dump({"custom-model": "cheap"}, f)
+        code, _, err = self._run(
+            ["--root", self.root, "--pricing", bad_prices, "--json"])
+        self.assertEqual(code, 2)
+        self.assertIn("pricing", err.lower())
+        code, _, err = self._run(
+            ["--root", self.root, "--pricing",
+             os.path.join(self.tmp.name, "missing.json"), "--json"])
+        self.assertEqual(code, 2)
+
+    def test_cost_budget_exit_codes(self):
+        self._write("tool-calls.jsonl", [
+            {"model": "gpt-4o", "tokens_in": 1_000_000, "tokens_out": 0},
+        ])
+        code, out, _ = self._run(["--root", self.root, "--json"])
+        self.assertEqual(code, 0)
+        payload = json.loads(out)
+        self.assertIsNone(payload["budget_usd"])
+        self.assertFalse(payload["budget_exceeded"])
+        self.assertAlmostEqual(payload["total"]["est_cost_usd"], 2.5)
+
+        code, _, _ = self._run(["--root", self.root, "--budget", "10"])
+        self.assertEqual(code, 0)
+
+        code, out, _ = self._run(
+            ["--root", self.root, "--budget", "1", "--json"])
+        self.assertEqual(code, 1)
+        self.assertTrue(json.loads(out)["budget_exceeded"])
+
+        code, markdown, _ = self._run(
+            ["--root", self.root, "--budget", "1"])
+        self.assertEqual(code, 1)
+        self.assertIn("BUDGET EXCEEDED", markdown)
+
+    def test_cost_json_schema_markdown_and_invalid_input(self):
+        self._write("tool-calls.jsonl", [
+            {"model": "gpt-4o", "tokens_in": 1000, "tokens_out": 500},
+            {"model": "ghost-model", "tokens_in": 10, "tokens_out": 5},
+        ])
+        code, out, _ = self._run(["--root", self.root, "--json"])
+        self.assertEqual(code, 0)
+        payload = json.loads(out)
+        self.assertEqual(set(payload.keys()),
+                         {"root", "models", "total", "skipped",
+                          "budget_usd", "budget_exceeded"})
+        self.assertEqual(set(payload["models"][0].keys()),
+                         {"model", "calls", "tokens_in", "tokens_out",
+                          "tokens_total", "est_cost_usd"})
+        self.assertEqual(set(payload["total"].keys()),
+                         {"calls", "tokens_in", "tokens_out", "tokens_total",
+                          "est_cost_usd", "unknown_models", "partial_cost"})
+        self.assertEqual(payload["root"], os.path.abspath(self.root))
+
+        code, markdown, _ = self._run(["--root", self.root])
+        self.assertEqual(code, 0)
+        self.assertIn("| Model | Calls | Tokens | Est. cost (USD) |", markdown)
+        self.assertIn("**TOTAL**", markdown)
+        self.assertIn("unknown pricing", markdown)
+
+        missing = os.path.join(self.tmp.name, "missing")
+        self.assertEqual(self._run(["--root", missing])[0], 2)
+        not_dir = os.path.join(self.tmp.name, "file.txt")
+        with open(not_dir, "w", encoding="utf-8") as f:
+            f.write("x")
+        self.assertEqual(self._run(["--root", not_dir])[0], 2)
+        self.assertEqual(
+            self._run(["--root", self.root, "--budget", "-1"])[0], 2)
+        broken = os.path.join(self.tmp.name, "broken.json")
+        with open(broken, "w", encoding="utf-8") as f:
+            f.write("{nope")
+        self.assertEqual(
+            self._run(["--root", self.root, "--pricing", broken])[0], 2)
 
 
 if __name__ == "__main__":
