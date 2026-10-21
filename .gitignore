@@ -13,6 +13,7 @@ venv/
 # Caches & reports
 backend/.cache/
 .ruff_cache/
+reports/
 
 # Frontend
 frontend/node_modules/
