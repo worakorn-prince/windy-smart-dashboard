@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [master]
 
+permissions:
+  contents: read
+
 jobs:
   backend-tests:
     name: Backend tests (Windows)
@@ -38,13 +41,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Run viewer logging tests
         run: python scripts/test_logging.py
+
+      - name: Smoke test CLI scripts (--help)
+        run: |
+          python scripts/compare.py --help
+          python scripts/cost.py --help
 
   frontend-build:
     name: Frontend build (Ubuntu)
@@ -63,6 +71,10 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
+
+      - name: Run frontend tests (vitest)
+        working-directory: frontend
+        run: npm run test
 
       - name: Build frontend (vue-tsc + vite)
         working-directory: frontend
