@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-21
+
+### Added
+
+- Alert rule management: `GET/PUT /api/alerts/rules`, persistent rules store (`backend/.cache/alert_rules.json`), per-channel toggles (toast/sound), hot-reload, and an Alert Rules card on the dashboard.
+- Security event history: `GET /api/security/events` backed by SQLite (`security_events`), plus live and persisted event logs on the Security page.
+- Process drilldown: `GET /api/processes/{pid}` (status, tree, listening ports) and `GET /api/processes/{pid}/history` backed by `process_samples`, with a uPlot detail panel.
+- Disk health: `GET /api/health/disk` with SMART status (PowerShell `Get-PhysicalDisk`) and days-to-full prediction from `disk_samples`.
+- Scheduled reports: `POST /api/reports/generate` (daily/weekly), `GET /api/reports` and `GET /api/reports/{name}`, background scheduler (`DASH_REPORT_INTERVAL_HOURS`, default 24, ≤ 0 disables), self-contained HTML output in `reports/`.
+- Viewer tooling: `scripts/watch.py` (live tail, `?auto=1` LIVE badge), `scripts/compare.py` (run-to-run regression detection, exit 1 on regression), `scripts/cost.py` (token/cost analytics per model with `--budget`), `scripts/retention.py` (archive old JSONL rows).
+- Frontend test suite (vitest + @vue/test-utils + jsdom): 26 tests across format utils, security store, and SettingsPanel.
+
+### Changed
+
+- `POST /api/maintenance/relaunch` is implemented (previously `501 RELAUNCH_DISABLED`): requires `{"confirm":"relaunch"}`, returns `202`, uses a detached helper script, and the Maintenance page polls for reconnect (60 s) behind a typed confirmation modal.
+- History retention: `backend/history.py prune --days` and daily auto-prune via `DASH_HISTORY_DAYS` (default 30).
+- Maintenance module bumped to 0.3.1; docs synced across `README.md`, `README-viewer.md`, `docs/MAINTENANCE-MODULE.md`, `docs/BENCHMARKS.md`.
+
+### Security
+
+- XSS hardening: exporters and static viewer escape all rendered values.
+- Canonical WebSocket `security_event` envelope, admin token support (`sessionStorage`), and `authHeaders` on security actions.
+- CSV export neutralizes spreadsheet formula injection; export failures return actionable 400 details.
+- CI runs ruff, backend pytest (228), viewer tests (32), frontend vitest (26), and a production build on every push/PR.
+
+### Fixed
+
+- Viewer metrics: single-pass computation for metrics/failure/observability with a `malformed_rows` counter.
+- 23 ruff findings in the maintenance module, behavior-preserving.
+
 ## [0.3.1] - 2026-10-20
 
 ### Added
