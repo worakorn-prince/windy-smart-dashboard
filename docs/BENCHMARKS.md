@@ -51,5 +51,5 @@ first — JSONL stays canonical until numbers say otherwise.
 
 ```powershell
 python scripts/bench.py --calls 10000
-python -m unittest discover -s scripts -p "test_logging.py"   # 22 tests incl. scale smoke
+python -m unittest discover -s scripts -p "test_logging.py"   # 32 tests incl. scale smoke
 ```

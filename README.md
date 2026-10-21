@@ -67,6 +67,11 @@ Open **http://127.0.0.1:8000** in your browser.
 > `.\run.ps1 -Clean` (wipe caches). On Linux/macOS this project will **not** run —
 > it is Windows-only (see above).
 
+> 🤖 Looking for the file-based **agent observability dashboard**? See
+> [`README-viewer.md`](README-viewer.md) for live tail (`scripts/watch.py`),
+> run comparison (`scripts/compare.py`), token/cost analytics
+> (`scripts/cost.py --budget`) and log retention (`scripts/retention.py`).
+
 ---
 
 ## ✨ Features
@@ -77,6 +82,16 @@ Open **http://127.0.0.1:8000** in your browser.
 - Disk usage per partition + read/write throughput
 - Network interfaces + live upload/download rate
 - Top 10 processes (sortable by CPU/RAM)
+- **Process drilldown** — click a process row for PID, command line, CPU/RAM,
+  a 3-level parent/child tree, listening ports and a uPlot CPU/RAM history
+  (`/api/processes/{pid}` and `/api/processes/{pid}/history`, sampled into
+  the `process_samples` table)
+- **Disk health** — per-volume usage, SMART status via PowerShell
+  `Get-PhysicalDisk` and a days-to-full forecast from `disk_samples`
+  (`GET /api/health/disk`)
+- **Scheduled HTML reports** — self-contained daily (`days=1`) or weekly
+  (`days=7`) reports covering usage, top processes, disk forecast and
+  security events, written to `reports/` (`ReportsCard` on the Maintenance page)
 - System info (hostname, OS, processor, uptime, boot time)
 - Internet speedtest **on-demand** (button — uses bandwidth, not polled)
   Implemented against Cloudflare's free `speed.cloudflare.com` endpoint
@@ -105,6 +120,10 @@ Open **http://127.0.0.1:8000** in your browser.
 - **Live event stream** — WebSocket push of new ports, outbound
   connections to suspicious countries or Tor exits, failed logins, and
   Defender state changes
+- **Persisted event history** — events are also appended to the
+  `security_events` table in the history DB and can be replayed from
+  `GET /api/security/events?limit=` (Security page: `LiveEventsLog` +
+  `SecurityEventsLog`)
 - **Risk scoring** (low / medium / high / critical) with weights from
   10+ heuristics (RDP exposure, unsigned listeners, Defender off, etc.)
 - **Action buttons** — kill a process by PID, block an outbound IP via
@@ -118,6 +137,10 @@ Open **http://127.0.0.1:8000** in your browser.
 - **Threshold alerts** with sustained-breach confirmation (no false
   alarms from momentary spikes) and per-rule cooldown: CPU/GPU
   temperature, RAM usage, disk-full level
+- **Editable alert rules** — `AlertRulesCard` changes thresholds, sustained
+  samples, cooldown and notification channels (toast / sound); saved to
+  `backend/.cache/alert_rules.json` and hot-reloaded without a restart
+  (`GET/PUT /api/alerts/rules`)
 - **Native Windows Toast notifications** (zero extra dependencies) plus
   in-app toast stack on every page
 
@@ -164,29 +187,42 @@ Dashboard/
 │   ├── config.py            Settings + intervals
 │   ├── metrics.py           psutil-based system metrics
 │   ├── history.py           SQLite metrics history (sampler + queries)
-│   ├── alerts.py            Threshold alerts + Windows Toast sender
+│   ├── alerts.py            Threshold alerts + rules store + Windows Toast
+│   ├── process_history.py   Per-process CPU/RAM samples (`process_samples`)
+│   ├── disk_health.py       SMART (`Get-PhysicalDisk`) + disk_samples + forecast
+│   ├── reports.py           Self-contained HTML daily/weekly report generator
 │   ├── sensors_lhm.py       LibreHardwareMonitorLib interop (temps/power)
 │   ├── speedtest_worker.py  On-demand Internet speed test
 │   ├── maintenance/         Maintenance module (guards, error codes,
 │   │                        PowerShell runner, scanner/system caches,
-│   │                        actions, cleaner, history, export, router)
-│   ├── tests/               pytest suite (alerts, history, parsers,
-│   │                        maintenance, updater parity, WS contract)
+│   │                        actions, cleaner, history, export, relaunch, router)
+│   ├── tests/               pytest suite (alerts/rules, history, parsers,
+│   │                        maintenance, security events, process drilldown,
+│   │                        relaunch, disk health, reports, retention, WS contract)
 │   ├── requirements.txt
 │   ├── security/
 │   │   ├── audit.py         On-demand audit + finding rules
 │   │   ├── monitor.py       Async background pollers → WS events
 │   │   ├── actions.py       Kill process / block IP / list rules
+│   │   ├── persistence.py   SQLite `security_events` history
 │   │   ├── findings.py      Finding + risk-score classes
 │   │   ├── geoip.py         ip-api.com lookup + Tor exit list
 │   │   └── winapi.py        PowerShell wrappers (Defender, logins, etc.)
 │   ├── exporters/
 │   │   └── __init__.py      PDF / HTML / JSON report writers
-│   └── .cache/              geoip cache, tor exits, generated reports
+│   └── .cache/              geoip cache, tor exits, alert_rules.json
+├── reports/                 Generated self-contained HTML reports
+├── scripts/                 Agent-log viewer tooling (see README-viewer.md):
+│   ├── watch.py             live tail rebuild loop (`?auto=1` LIVE badge)
+│   ├── compare.py           base vs candidate run comparison (exit 1 on regression)
+│   ├── cost.py              token/cost per model (+ `--budget` gate)
+│   └── retention.py         archive/prune old JSONL rows
 └── frontend/
     ├── package.json
     ├── vite.config.ts       proxy /api and /ws → 127.0.0.1:8000
+    ├── vitest.config.ts     unit-test config
     ├── tsconfig.json
+    ├── tests/               vitest suites (format, security store, settings)
     └── src/
         ├── main.ts          App bootstrap + router
         ├── App.vue          Layout + global styles
@@ -197,14 +233,16 @@ Dashboard/
         ├── components/
         │   ├── dashboard/   CpuCard, RamCard, DiskCard, NetworkCard,
         │   │                 GpuCard, AdaptersCard, HistoryCard,
-        │   │                 ProcessesCard, SystemCard, SpeedtestCard,
-        │   │                 PowerCard, AlertsCard, HealthStrip
+        │   │                 ProcessesCard, ProcessDetailPanel,
+        │   │                 SystemCard, SpeedtestCard, PowerCard,
+        │   │                 AlertsCard, AlertRulesCard, HealthStrip
         │   ├── security/    AuditCard, PortsCard, ConnectionsCard,
         │   │                 DefenderCard, FailedLoginsCard,
-        │   │                 SecurityEventsLog, SettingsPanel,
-        │   │                 BlockedRulesCard
+        │   │                 LiveEventsLog, SecurityEventsLog,
+        │   │                 SettingsPanel, BlockedRulesCard
         │   └── maintenance/ MaintenanceTable, MaintenancePanel,
-        │                     MaintenanceHistory, MaintenanceAdminBanner
+        │                     MaintenanceHistory, MaintenanceAdminBanner,
+        │                     DiskHealthCard, ReportsCard
         ├── composables/      useWebSocket, format helpers
         ├── directives/       autoTip (hover tooltips on clipped text)
         ├── utils/            format.ts (bytes / duration / percent)
@@ -304,17 +342,30 @@ Open **http://localhost:5173** — Vite proxies `/api` and `/ws` to
 | GET    | `/api/system`                 | Initial system snapshot                   |
 | GET    | `/api/sensors/status`         | LibreHardwareMonitor init status (availability / elevation) |
 | GET    | `/api/history?range=1h|6h|24h`| Bucketed metrics history (~360 points)    |
+| GET    | `/api/processes/{pid}`        | Process detail + 3-level tree + listening ports |
+| GET    | `/api/processes/{pid}/history?limit=60` | Per-process CPU/RAM samples (1–240) |
+| GET    | `/api/health/disk`            | Per-volume usage, SMART health, days-to-full forecast |
 | POST   | `/api/speedtest`              | Trigger an Internet speed test            |
+| GET    | `/api/alerts/rules`           | Effective alert rules + notification channels |
+| PUT    | `/api/alerts/rules`           | Replace rules + channels (validated, hot-reload) |
 | GET    | `/api/security/suspicious`    | List currently-flagged country codes      |
 | PUT    | `/api/security/suspicious`    | Override suspicious-countries list        |
 | POST   | `/api/security/audit`         | Run an on-demand audit; returns full report |
-| POST   | `/api/security/kill`          | Kill a process by PID (body: `{pid}`)     |
-| POST   | `/api/security/block`         | Add Windows firewall block rule (`{ip}`)  |
-| POST   | `/api/security/unblock`       | Delete a block rule (`{rule_name}`)       |
+| POST   | `/api/security/kill`          | Kill a process by PID (body: `{pid}`) (admin) |
+| POST   | `/api/security/block`         | Add Windows firewall block rule (`{ip}`) (admin) |
+| POST   | `/api/security/unblock`       | Delete a block rule (`{rule_name}`) (admin) |
 | GET    | `/api/security/blocked`       | List all `WindySmartDashboard_block_*` rules |
+| GET    | `/api/security/events?limit=50` | Persisted security event history, newest first (admin) |
 | POST   | `/api/security/export`        | Export audit (body: `{fmt, report}`)     |
+| POST   | `/api/reports/generate`       | Generate `{"days": 1|7}` self-contained HTML report (admin) |
+| GET    | `/api/reports`                | List generated reports, newest first (admin) |
+| GET    | `/api/reports/{name}`         | Download one generated report (admin)     |
 | WS     | `/ws/metrics`                 | Live metrics push (1 Hz)                  |
 | WS     | `/ws/security`                | Live security events push                 |
+
+> 🔐 Endpoints marked **(admin)** call `require_admin`: when
+> `DASH_ADMIN_TOKEN` is set they require `X-Admin-Token: <token>`; when it is
+> empty only loopback (`127.0.0.1` / `::1`) requests are accepted.
 
 ---
 
@@ -340,17 +391,19 @@ environment variables:
 | `DASH_ALERT_DISK_PCT`      | 90      | Disk usage alert threshold (%)          |
 | `DASH_ALERT_SUSTAINED`     | 3       | Consecutive samples required to fire    |
 | `DASH_ALERT_COOLDOWN`      | 300     | Seconds between repeat alerts per rule  |
+| `DASH_ADMIN_TOKEN`         | *(empty)* | Require `X-Admin-Token` on admin endpoints; empty = loopback-only |
+| `DASH_REPORT_INTERVAL_HOURS` | 24    | Hours between scheduled HTML reports (`<=0` disables) |
 
 ---
 
 ## 🧰 Maintenance module
 
 Windows housekeeping ported from the legacy `updater` project
-(`MERGE-005b`). The backend lives in `backend/maintenance/` (guards,
-22 error codes, PowerShell runner, scanner cache 30 s, system cache 60 s,
-actions, cleaner, history, export, router) and exposes device/driver scan
-status, action history, CSV/JSON export, and a guarded cleaner for temp
-folders and the recycle bin.
+(`MERGE-005b`). The backend lives in `backend/maintenance/` (module version
+`0.3.1`: guards, 22 error codes, PowerShell runner, scanner cache 30 s,
+system cache 60 s, actions, cleaner, history, export, relaunch, router) and
+exposes device/driver scan status, action history, CSV/JSON export, a guarded
+cleaner for temp folders and the recycle bin, and a confirmed relaunch.
 
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -361,7 +414,7 @@ folders and the recycle bin.
 | POST | `/api/maintenance/action` | `{action}` → `wu-scan` or `pnputil-scan` |
 | POST | `/api/maintenance/clean` | `{targets, confirm:true}` → `user-temp`, `windows-temp`, `recycle-bin` |
 | POST | `/api/maintenance/export` | `{kind, format}` → devices/history × csv/json |
-| POST | `/api/maintenance/relaunch` | Always `501 RELAUNCH_DISABLED` |
+| POST | `/api/maintenance/relaunch` | `{confirm:"relaunch"}` → `202` + detached helper; the page polls until the backend reconnects |
 
 Access control:
 
@@ -373,7 +426,8 @@ Access control:
 UI: route `/maintenance` (`frontend/src/main.ts`) renders
 `pages/Maintenance.vue` with `components/maintenance/`
 (`MaintenanceTable`, `MaintenancePanel`, `MaintenanceHistory`,
-`MaintenanceAdminBanner`) and the Pinia store `stores/maintenance.ts`.
+`MaintenanceAdminBanner`, `DiskHealthCard`, `ReportsCard`) and the Pinia
+store `stores/maintenance.ts`.
 Sort choice persists in `localStorage['dashboard:maintenance:sort']`;
 an admin token (if used) is stored in `localStorage['dashboard:adminToken']`.
 
@@ -385,8 +439,11 @@ cd backend
 ```
 
 > ⛔ Maintenance never auto-installs or auto-updates anything. `wu-scan`
-> and `pnputil-scan` are read-only scans, `clean` requires `confirm: true`,
-> and `relaunch` is permanently disabled (`501`).
+> and `pnputil-scan` are read-only scans and `clean` requires
+> `confirm: true`. `relaunch` is enabled but guarded: the body must be
+> `{"confirm":"relaunch"}`, the server returns `202` and starts a detached
+> helper, and the page polls `GET /api/maintenance/status` until the backend
+> reconnects (60 s timeout).
 
 ---
 

@@ -61,10 +61,70 @@ scripts/
   aggregate.py       # cross-project merge → dashboard/all-projects.json (--projects A,B,C)
   tools_inventory.py # 16-tool catalog x agent permissions (optional) x actual usage
   bootstrap.py       # init .agent/ skeleton (+ --demo sample data)
-  test_logging.py    # 22 tests
+  watch.py           # live tail: rebuild dashboard/data.json when JSONL changes
+  compare.py         # base vs candidate run comparison (regression gate)
+  cost.py            # token/cost per model (+ --budget gate)
+  retention.py       # archive old JSONL rows to .agent/archive/
+  test_logging.py    # 32 tests
 dashboard/
   index.html         # single-project view (5 charts + 17 tables)
   all.html           # cross-project view (6 charts + 20 tables)
+```
+
+## Live tail
+
+`watch.py` polls `.agent/**/tool-calls.jsonl` and `events.jsonl` and rebuilds
+`dashboard/data.json` whenever a file changes (default every 2 s):
+
+```powershell
+python scripts/watch.py --root . --interval 2   # Ctrl+C to stop
+python scripts/watch.py --root . --once         # single check cycle, then exit
+```
+
+Open `dashboard/index.html?auto=1` — the header shows a **LIVE** badge and the
+page refreshes every 5 s. Without `auto=1` the page loads data once.
+
+## Run comparison
+
+`compare.py` diffs two runs (base vs candidate) and prints a markdown table
+(or `--json`). A regression makes the process **exit 1**, so it can gate CI:
+
+```powershell
+python scripts/compare.py --base .\runs\before --cand .\runs\after
+python scripts/compare.py --base .\runs\before --cand .\runs\after --json
+```
+
+`--base`/`--cand` accept a project dir containing `.agent/` (metrics.json or
+tool-calls.jsonl) — exit code 2 means invalid/missing input.
+
+## Cost analytics
+
+`cost.py` aggregates tokens and estimated USD cost per model, with an optional
+budget gate:
+
+```powershell
+python scripts/cost.py --root . --budget 5
+python scripts/cost.py --root . --pricing prices.json --json
+```
+
+Exit codes: `0` within budget, `1` budget exceeded, `2` invalid input. The
+`--pricing` file overrides the built-in per-model price table.
+
+## Retention
+
+`retention.py` moves rows older than `--days` into
+`.agent/archive/<stem>-<YYYYMMDD>.jsonl` and rewrites the source file; rows
+without a parseable timestamp are always kept. Preview first with `--dry-run`:
+
+```powershell
+python scripts/retention.py --root . --days 30 --dry-run
+python scripts/retention.py --root . --days 30
+```
+
+The backend history DB has its own pruner (default 30 days):
+
+```powershell
+python backend/history.py prune --days 30
 ```
 
 ## Tool permission tables (optional)

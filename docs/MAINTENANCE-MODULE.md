@@ -1,8 +1,8 @@
 # MAINTENANCE-MODULE — แผนรวมโมดูล Maintenance (MERGE-001)
 
-> สถานะ: **implemented (release v0.3.0)** — โค้ดจริงอยู่ที่ `backend/maintenance/` + หน้า `/maintenance`
-> ขอบเขต: พอร์ตความสามารถของโปรเจกต์ `updater` (Node.js) เข้ามาเป็นโมดูลใน `Dashboard` (Python FastAPI + Vue3/TS)
-> หมายเหตุ: `relaunch` ปิดตั้งแต่ตั้งใจ (`501 RELAUNCH_DISABLED` ตาม CHANGELOG 0.3.0)
+> สถานะ: **implemented (release v0.3.1, module version 0.3.1)** — โค้ดจริงอยู่ที่ `backend/maintenance/` + หน้า `/maintenance`
+> ขอบเขต: พอร์ตความสามารถของโปรเจกต์ `updater` (Node.js) มาเป็นโมดูลใน `Dashboard` (Python FastAPI + Vue3/TS)
+> หมายเหตุ: `relaunch` เปิดใช้งานแล้ว (FEAT-303) — ต้องส่ง `{"confirm":"relaunch"}` → `202` + detached helper + frontend poll จน reconnect (timeout 60 s); เดิมเคยปิดด้วย `501 RELAUNCH_DISABLED` ใน v0.3.0 (now superseded)
 
 ---
 
@@ -77,11 +77,25 @@ updater เป็น Node.js (`server.js`) ที่ทำงานคนละ 
 | POST | `/api/maintenance/action` | `lib/updater.js` (`ALLOWED_ACTIONS`) | **ใช่** | body ต้องอยู่ใน allowlist เท่านั้น |
 | POST | `/api/maintenance/clean` | `lib/cleaner.js` (`ALLOWED_TARGETS`) | **ใช่** | ต้องมี confirm + log |
 | POST | `/api/maintenance/export` | `lib/export.js` | **ใช่** | ส่งออกข้อมูล (ไม่รันคำสั่ง) — สร้าง CSV (BOM+CRLF) / JSON ใน `maintenance/export.py` เอง ส่งกลับเป็น response ไม่เขียนดิสก์ |
-| POST | `/api/maintenance/relaunch` | `lib/system.js` (relaunch) | **ใช่** | เลี่ยงพอร์ต 3100 เดิม → ใช้กลไกของ Dashboard (launcher `run.ps1`, หัวข้อ "How to start" ใน `README.md`) |
+| POST | `/api/maintenance/relaunch` | `lib/system.js` (relaunch) | **ใช่** | `{"confirm":"relaunch"}` → `202` + detached helper (ไม่ผูกพอร์ต 3100); frontend โพสต์แล้ว poll `/api/maintenance/status` จน reconnect หรือ timeout 60 s |
 
 > หมายเหตุ: endpoint ที่ "ไม่ต้อง auth" ยังคงต้องถูกป้องกันด้วย Host check + CSRF guard (ดูหัวข้อ 6) และอ่านจาก localhost เท่านั้น
 > หมายเหตุ CORS: โหมด dev ใช้ Vite proxy `/api` และ `/ws` → `127.0.0.1:8000` (หัวข้อ "Development mode" ใน `README.md`) และโหมด prod เป็น same-origin → โดยทั่วไปไม่ต้องเพิ่ม origin ใหม่ใน allowlist (CORS middleware ใน `backend/main.py`) แต่ต้องยืนยันว่า path ใหม่ไม่ถูกบล็อก
 > **สำคัญ**: frontend store เดิมอย่าง `stores/security.ts` ยิง `fetch('/api/...')` แบบ **ไม่ส่ง `X-Admin-Token`** — ต้องตัดสินใจเรื่องการแนบ token (ดูคำถามข้อ 2)
+
+### Endpoints เสริม (นอก namespace `/api/maintenance`)
+
+โมดูล maintenance ใช้ endpoint ระดับแอปที่เพิ่มใน Sprint 2–3 ร่วมด้วย:
+
+| Method | Path | ต้อง auth | หมายเหตุ |
+|--------|------|-----------|----------|
+| GET | `/api/health/disk` | ไม่ | usage ต่อ mount + SMART ผ่าน PowerShell `Get-PhysicalDisk` + `days_to_full` จากตาราง `disk_samples` |
+| POST | `/api/reports/generate` | **ใช่** | body `{"days": 1}` หรือ `{"days": 7}` → สร้าง HTML self-contained ลง `reports/` แล้ว prune เก็บ 30 ไฟล์ล่าสุด |
+| GET | `/api/reports` | **ใช่** | รายการรายงานใหม่สุดก่อน (`name`, `size`, `created`) |
+| GET | `/api/reports/{name}` | **ใช่** | ดาวน์โหลดรายงาน; ชื่อต้อง match `report-YYYYMMDD-HHMMSS-d1\|d7.html` |
+| — | scheduler | — | env `DASH_REPORT_INTERVAL_HOURS` (default 24, ค่า `<=0` ปิด scheduler) สร้างรายงาน 1 วันอัตโนมัติหลัง startup delay |
+
+> UI: `DiskHealthCard` และ `ReportsCard` อยู่ใน `frontend/src/components/maintenance/` และแสดงบนหน้า `/maintenance`
 
 ---
 
@@ -248,14 +262,14 @@ frontend/src/
 
 ## Implementation notes & deviations
 
-สถานะจริง: implemented (MERGE-001..006a + HARDEN-001/002) — parity test `tests/test_parity_updater.py`
-ผ่าน และ `python -m pytest tests -q` = **92 passed**, `npm run build` = 124 modules
+สถานะจริง: implemented (MERGE-001..006a + HARDEN-001/002 + FEAT-303 relaunch) — parity test `tests/test_parity_updater.py`
+ผ่าน, `python -m pytest tests -q` = **228 passed**, `npm run build` ผ่าน
 
 ความต่างจาก updater เดิม 8 ข้อ (เจตนา):
 
 1. Error codes มี 22 รหัส (ต้นทางมี 22 ไม่ใช่ 25)
 2. `open-devmgmt` ถูกตัดออก → ตอบ `UNSUPPORTED_ACTION`
-3. `relaunch` ปิดถาวร → `501 RELAUNCH_DISABLED`
+3. `relaunch` เปิดใช้งานจริง (เดิม v0.3.0 ปิดด้วย `501 RELAUNCH_DISABLED` — now superseded): `202` + confirm phrase `{"confirm":"relaunch"}` + PowerShell helper แบบ detached ที่รอแล้ว start backend ใหม่ + frontend reconnect poll (60 s timeout) พร้อม audit ลง security events และ maintenance history
 4. เพิ่ม `GET /api/maintenance/history` (updater เดิมไม่มี)
 5. History เก็บใน SQLite ตาราง `maintenance_actions` (`HISTORY_DB`) ไม่ใช่ JSON
 6. ~~Cleanup ไม่มี endpoint สรุปขนาดแยก~~ → **แก้ไขใน HARDEN-001**: คืน `GET /api/maintenance/clean/summary` (read-only, ไม่ลบไฟล์) เพื่อให้ผู้ใช้เห็นขนาดก่อนกดล้าง
@@ -283,10 +297,14 @@ Mapping ไฟล์จริง:
 | Cleaner (`user-temp`, `windows-temp`, `recycle-bin`) | `backend/maintenance/cleaner.py` |
 | History (SQLite `maintenance_actions`) | `backend/maintenance/history.py` |
 | Export (CSV/JSON) | `backend/maintenance/export.py` |
+| Disk health (SMART + samples + forecast) | `backend/disk_health.py` |
+| Reports (HTML + scheduler + prune) | `backend/reports.py` |
 | Router (8 endpoints) | `backend/maintenance/router.py` |
 | Frontend route + หน้า | `frontend/src/main.ts`, `frontend/src/pages/Maintenance.vue` |
-| Components | `frontend/src/components/maintenance/{MaintenanceTable,MaintenancePanel,MaintenanceHistory,MaintenanceAdminBanner}.vue` |
+| Components | `frontend/src/components/maintenance/{MaintenanceTable,MaintenancePanel,MaintenanceHistory,MaintenanceAdminBanner,DiskHealthCard,ReportsCard}.vue` |
 | Store | `frontend/src/stores/maintenance.ts` |
 
 ข้อห้าม: โมดูลนี้ไม่ auto-install / auto-update เด็ดขาด — `wu-scan` และ
-`pnputil-scan` เป็น read-only scan, `clean` ต้องส่ง `confirm: true`, และ `relaunch` ปิดถาวร
+`pnputil-scan` เป็น read-only scan, `clean` ต้องส่ง `confirm: true` และ
+`relaunch` ต้องส่ง confirm phrase `{"confirm":"relaunch"}` เท่านั้น (server ตอบ
+`202` แล้วให้ helper แยกโปรเซสทำงาน; UI จะ poll จน reconnect ภายใน 60 วินาที)
