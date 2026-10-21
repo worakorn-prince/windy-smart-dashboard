@@ -21,6 +21,9 @@ Endpoints:
   GET /api/processes/{pid}           — process detail + parent/child tree + ports
   GET /api/processes/{pid}/history   — per-process CPU/RAM samples (newest last)
   GET /api/health/disk               — disk usage, SMART health, days-to-full
+  POST /api/reports/generate         — generate daily/weekly HTML report (admin)
+  GET /api/reports                   — list generated reports (admin)
+  GET /api/reports/{name}            — download one generated report (admin)
 """
 from __future__ import annotations
 
@@ -29,6 +32,7 @@ import contextlib
 import ipaddress
 import json
 import logging
+import os
 import re
 import socket
 import threading
@@ -51,6 +55,7 @@ import history
 from maintenance.router import router as maintenance_router
 import metrics
 import process_history
+import reports
 import speedtest_worker
 from alerts import (
     evaluate as evaluate_alerts,
@@ -172,12 +177,13 @@ async def lifespan(app: FastAPI):
     process_task = asyncio.create_task(_process_loop())
     uptime_task = asyncio.create_task(_uptime_loop())
     history_task = asyncio.create_task(_history_loop())
+    report_task = asyncio.create_task(_report_loop())
     try:
         yield
     finally:
         if sec_mon:
             await sec_mon.stop()
-        for t in (metrics_task, process_task, uptime_task, history_task):
+        for t in (metrics_task, process_task, uptime_task, history_task, report_task):
             t.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await t
@@ -441,6 +447,39 @@ async def _history_loop() -> None:
         await asyncio.sleep(config.HISTORY_SAMPLE_INTERVAL)
 
 
+_REPORT_STARTUP_DELAY = 300.0
+
+
+def _report_interval_hours() -> float:
+    """Parse DASH_REPORT_INTERVAL_HOURS; <=0 disables scheduled reports."""
+    raw = os.environ.get("DASH_REPORT_INTERVAL_HOURS", "24")
+    try:
+        hours = float(raw)
+    except (TypeError, ValueError):
+        logger.warning("invalid DASH_REPORT_INTERVAL_HOURS=%r; using 24h", raw)
+        return 24.0
+    return hours if hours > 0 else 0.0
+
+
+async def _report_loop() -> None:
+    """Generate a daily HTML report after a startup delay, then per interval."""
+    interval_hours = _report_interval_hours()
+    if interval_hours <= 0:
+        logger.info("scheduled reports disabled (DASH_REPORT_INTERVAL_HOURS<=0)")
+        return
+    await asyncio.sleep(_REPORT_STARTUP_DELAY)
+    while True:
+        try:
+            path = await asyncio.to_thread(reports.generate_report, 1)
+            await asyncio.to_thread(reports.prune_reports, reports.DEFAULT_KEEP)
+            logger.info("scheduled report written: %s", path)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("scheduled report generation failed")
+        await asyncio.sleep(interval_hours * 3600)
+
+
 async def _quick_ping(host: str, timeout: float = 1.0) -> float | None:
     """Quick latency probe using asyncio TCP connect latency (no raw ICMP)."""
     import socket
@@ -552,6 +591,44 @@ async def api_process_history(
 async def api_disk_health() -> dict[str, Any]:
     """Read-only disk usage/health: per-mount usage, SMART and forecast."""
     return await asyncio.to_thread(_disk_health_payload)
+
+
+@app.post("/api/reports/generate")
+async def api_reports_generate(
+    payload: dict[str, Any] | None = None,
+    _admin: None = Depends(require_admin),
+) -> dict[str, Any]:
+    """Generate a 1-day or 7-day self-contained HTML report, then prune."""
+    body = payload or {}
+    days = body.get("days", 1)
+    if isinstance(days, bool) or not isinstance(days, int) or days not in reports.ALLOWED_DAYS:
+        raise HTTPException(status_code=400, detail="days must be 1 or 7")
+    try:
+        path = await asyncio.to_thread(reports.generate_report, days)
+        await asyncio.to_thread(reports.prune_reports, reports.DEFAULT_KEEP)
+    except Exception as exc:
+        logger.exception("report generation failed")
+        raise HTTPException(status_code=500, detail="report generation failed") from exc
+    return {"name": path.name, "size": path.stat().st_size, "path": str(path)}
+
+
+@app.get("/api/reports")
+async def api_reports_list(_admin: None = Depends(require_admin)) -> list[dict[str, Any]]:
+    """List generated reports, newest first (admin-gated)."""
+    return await asyncio.to_thread(reports.list_reports)
+
+
+@app.get("/api/reports/{name}")
+async def api_reports_download(
+    name: str,
+    _admin: None = Depends(require_admin),
+) -> FileResponse:
+    """Download one generated report; reject names outside the reports dir."""
+    base = Path(reports.REPORTS_DIR).resolve()
+    path = (base / name).resolve()
+    if not reports.REPORT_NAME_RE.match(name) or path.parent != base or not path.is_file():
+        raise HTTPException(status_code=404, detail="report_not_found")
+    return FileResponse(str(path), media_type="text/html", filename=name)
 
 
 @app.post("/api/speedtest")
