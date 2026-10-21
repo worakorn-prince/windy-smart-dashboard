@@ -6,6 +6,7 @@ import MaintenanceAdminBanner from '@/components/maintenance/MaintenanceAdminBan
 import MaintenancePanel from '@/components/maintenance/MaintenancePanel.vue'
 import MaintenanceTable from '@/components/maintenance/MaintenanceTable.vue'
 import MaintenanceHistory from '@/components/maintenance/MaintenanceHistory.vue'
+import DiskHealthCard from '@/components/maintenance/DiskHealthCard.vue'
 
 const store = useMaintenanceStore()
 
@@ -294,6 +295,8 @@ onUnmounted(stopReconnectWatch)
       </div>
 
       <MaintenancePanel />
+
+      <DiskHealthCard />
 
       <div class="card">
         <h3>ส่งออกข้อมูล</h3>

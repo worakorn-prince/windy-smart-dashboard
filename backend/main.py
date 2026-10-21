@@ -20,6 +20,7 @@ Endpoints:
   POST /api/security/export          — {fmt: pdf|html|json} -> returns file
   GET /api/processes/{pid}           — process detail + parent/child tree + ports
   GET /api/processes/{pid}/history   — per-process CPU/RAM samples (newest last)
+  GET /api/health/disk               — disk usage, SMART health, days-to-full
 """
 from __future__ import annotations
 
@@ -45,6 +46,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 import config
+import disk_health
 import history
 from maintenance.router import router as maintenance_router
 import metrics
@@ -180,6 +182,7 @@ async def lifespan(app: FastAPI):
             with contextlib.suppress(asyncio.CancelledError):
                 await t
         process_history.close()
+        disk_health.close()
 
 
 app = FastAPI(title="Windy Smart Dashboard", lifespan=lifespan)
@@ -411,7 +414,7 @@ async def _uptime_loop() -> None:
 
 
 async def _history_loop() -> None:
-    """Persist one metrics sample plus top-20 process samples per interval."""
+    """Persist one metrics sample plus top-20 process and disk usage samples per interval."""
     while True:
         try:
             sample = await asyncio.to_thread(history.record_sample)
@@ -420,6 +423,11 @@ async def _history_loop() -> None:
                 await asyncio.to_thread(process_history.record_samples, procs)
             except Exception:
                 logger.exception("process history sampling failed")
+            try:
+                disks = await asyncio.to_thread(disk_health.disk_usage)
+                await asyncio.to_thread(disk_health.record_samples, disks)
+            except Exception:
+                logger.exception("disk history sampling failed")
             fired = await asyncio.to_thread(evaluate_alerts, sample)
             toast_enabled = get_alert_channels().get("toast", True)
             for a in fired:
@@ -455,6 +463,38 @@ async def _quick_ping(host: str, timeout: float = 1.0) -> float | None:
 
 
 # ---- REST ---- #
+
+def _disk_health_payload() -> dict[str, Any]:
+    """Assemble per-mount usage, SMART status and days-to-full forecasts."""
+    try:
+        disks = disk_health.disk_usage()
+    except Exception:
+        logger.exception("disk usage snapshot failed")
+        disks = []
+
+    predictions: list[dict[str, Any]] = []
+    for disk in disks:
+        mount = disk.get("mount")
+        try:
+            forecast = disk_health.predict_days_to_full(disk_health.get_samples(mount))
+        except Exception:
+            logger.exception("disk forecast failed for %s", mount)
+            forecast = {"days_to_full": None, "trend_gb_per_day": None, "samples": 0}
+        predictions.append({"mount": mount, **forecast})
+
+    try:
+        smart = disk_health.smart_info()
+    except Exception:
+        logger.exception("SMART query failed")
+        smart = {"available": False, "error": "smart query failed"}
+
+    return {
+        "disks": disks,
+        "smart": smart,
+        "predictions": predictions,
+        "sampled_at": datetime.now().isoformat(),
+    }
+
 
 @app.get("/api/system")
 async def get_system() -> dict[str, Any]:
@@ -506,6 +546,12 @@ async def api_process_history(
 ) -> list[dict[str, Any]]:
     """CPU/RAM samples for one process, oldest first (newest last)."""
     return await asyncio.to_thread(process_history.get_history, pid, limit)
+
+
+@app.get("/api/health/disk")
+async def api_disk_health() -> dict[str, Any]:
+    """Read-only disk usage/health: per-mount usage, SMART and forecast."""
+    return await asyncio.to_thread(_disk_health_payload)
 
 
 @app.post("/api/speedtest")
