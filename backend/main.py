@@ -57,6 +57,7 @@ import config
 import disk_health
 import history
 from maintenance.router import router as maintenance_router
+from viewer_api import router as viewer_router
 import metrics
 import process_history
 import reports
@@ -972,8 +973,8 @@ async def ws_security(ws: WebSocket) -> None:
     finally:
         manager.security.discard(ws)
 
-
 app.include_router(maintenance_router)
+app.include_router(viewer_router)
 
 # ---- Serving frontend (production) ---- #
 

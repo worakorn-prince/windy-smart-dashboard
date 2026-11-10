@@ -21,10 +21,11 @@ test.describe('Shell and dashboard', () => {
     await expect(page.getByRole('link', { name: /Windy Smart Dashboard/ })).toBeVisible()
 
     const navLinks = page.locator('header.nav nav a')
-    await expect(navLinks).toHaveCount(3)
+    await expect(navLinks).toHaveCount(4)
     await expect(navLinks.nth(0)).toHaveText('Dashboard')
     await expect(navLinks.nth(1)).toHaveText('Security')
     await expect(navLinks.nth(2)).toHaveText('Maintenance')
+    await expect(navLinks.nth(3)).toHaveText('Viewer')
 
     const primaryZone = page.locator('[data-testid="primary-zone"]')
     await expect(primaryZone).toBeVisible()
