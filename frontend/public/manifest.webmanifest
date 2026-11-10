@@ -1,0 +1,21 @@
+{
+  "name": "Windy Smart Dashboard",
+  "short_name": "Windy Dashboard",
+  "description": "แดชบอร์ดมอนิเตอร์ระบบ พลังงาน ความปลอดภัย และงานบำรุงรักษา",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f1020",
+  "theme_color": "#0f1020",
+  "lang": "th",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

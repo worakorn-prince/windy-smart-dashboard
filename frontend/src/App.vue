@@ -286,4 +286,46 @@ button.warn { background: var(--warn); color: #1a1a1a; border-color: var(--warn)
 .card-scroll::-webkit-scrollbar-thumb:hover {
   background: var(--muted);
 }
+
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 900px) {
+  .nav {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .nav .brand {
+    font-size: 14px;
+  }
+
+  .content {
+    padding: 12px;
+  }
+}
+
+@media (max-width: 640px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .nav nav {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .card {
+    padding: 12px;
+  }
+
+  table {
+    font-size: 11px;
+  }
+}
+
 </style>
