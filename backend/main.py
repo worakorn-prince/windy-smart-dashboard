@@ -33,6 +33,7 @@ import ipaddress
 import json
 import logging
 import os
+import platform
 import re
 import socket
 import threading
@@ -158,6 +159,15 @@ load_suspicious()
 
 
 # ---- FastAPI app ---- #
+APP_VERSION = "0.5.0"
+
+_APP_DESCRIPTION = (
+    "Local-only real-time monitoring dashboard for Windows (CPU, RAM, disk, network, processes). "
+    "Includes a security audit module, scheduled HTML reports and a maintenance module. "
+    "แดชบอร์ดมอนิเตอร์เครื่องนี้แบบเรียลไทม์ พร้อมระบบตรวจความปลอดภัยและรายงาน HTML (bind 127.0.0.1 เท่านั้น)"
+)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global sec_mon
@@ -191,7 +201,12 @@ async def lifespan(app: FastAPI):
         disk_health.close()
 
 
-app = FastAPI(title="Windy Smart Dashboard", lifespan=lifespan)
+app = FastAPI(
+    title="Windy Smart Dashboard",
+    version=APP_VERSION,
+    description=_APP_DESCRIPTION,
+    lifespan=lifespan,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[f"http://localhost:{config.PORT}", "http://127.0.0.1:5173",
@@ -539,6 +554,18 @@ def _disk_health_payload() -> dict[str, Any]:
 async def get_system() -> dict[str, Any]:
     return {"system": metrics.system_snapshot(), "cpu": metrics.cpu_snapshot(),
             "ram": metrics.ram_snapshot(), "gpu": metrics.gpu_snapshot()}
+
+
+@app.get("/api/version")
+async def api_version() -> dict[str, Any]:
+    """App/runtime version info for external health checks."""
+    return {
+        "name": "windy-smart-dashboard",
+        "version": APP_VERSION,
+        "python": platform.python_version(),
+        "platform": platform.platform(),
+        "port": config.PORT,
+    }
 
 
 @app.get("/api/sensors/status")

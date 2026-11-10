@@ -367,6 +367,11 @@ Open **http://localhost:5173** — Vite proxies `/api` and `/ws` to
 > `DASH_ADMIN_TOKEN` is set they require `X-Admin-Token: <token>`; when it is
 > empty only loopback (`127.0.0.1` / `::1`) requests are accepted.
 
+📚 **Docs:** full endpoint table, auth model and WebSocket envelopes live in
+[`docs/API.md`](docs/API.md). With the app running, the generated reference is at
+**http://127.0.0.1:8000/docs** (Swagger UI), `/redoc` (ReDoc) and
+`/openapi.json` (OpenAPI schema). `GET /api/version` reports the running version.
+
 ---
 
 ## ⚙️ Configuration
