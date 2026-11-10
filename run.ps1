@@ -1,9 +1,12 @@
 #run.ps1 — One-step launcher for Windy Smart Dashboard.
 #
 #Usage:
-#  .\run.ps1            Build frontend if needed, then run server.
+#  .\run.ps1            Build frontend if needed, then run server; opens the
+#                       dashboard in your browser once the server is ready.
 #  .\run.ps1 -Dev       Run both backend (port 8000) and frontend dev (5173)
-#                       in separate windows for HMR.
+#                       in separate windows for HMR; opens the browser when
+#                       both are up.
+#  .\run.ps1 -NoBrowser Do not auto-open the browser (server only).
 #  .\run.ps1 -Install    Install/reinstall backend + frontend deps.
 #  .\run.ps1 -Clean      Wipe caches; does NOT remove node_modules or pip pkgs.
 #
@@ -12,7 +15,8 @@
 param(
   [Alias("d")][switch]$Dev,
   [Alias("i")][switch]$Install,
-  [Alias("c")][switch]$Clean
+  [Alias("c")][switch]$Clean,
+  [Alias("n")][switch]$NoBrowser
 )
 
 # --- Auto-elevate ------------------------------------------------------------
@@ -26,6 +30,7 @@ if (-not $isAdmin) {
   if ($Dev)    { $relaunch += "-Dev" }
   if ($Install){ $relaunch += "-Install" }
   if ($Clean)  { $relaunch += "-Clean" }
+  if ($NoBrowser){ $relaunch += "-NoBrowser" }
   Start-Process powershell -ArgumentList $relaunch -Verb RunAs
   exit
 }
@@ -40,6 +45,41 @@ function Write-Step($msg) { Write-Host "`n[run] $msg" -ForegroundColor Cyan }
 function Write-Ok($msg)   { Write-Host "  OK  $msg" -ForegroundColor Green }
 function Write-Warn($msg) { Write-Host "  !   $msg" -ForegroundColor Yellow }
 function Die($msg)        { Write-Host "  X   $msg" -ForegroundColor Red; exit 1 }
+
+# --- Auto-open browser when the server is ready --------------------------------
+# A tiny standalone script is written to %TEMP% and launched as a background job:
+#  - production mode: job runs in this process, polls 8000, opens the dashboard
+#    then the job lives until the server stops.
+#  - dev mode: the SAME script is launched as a job inside the frontend window,
+#    so the frontend window is the one that opens the browser once 8000 answers.
+# This keeps one polling implementation instead of two inlined copies.
+$autoOpenPs1 = Join-Path $env:TEMP "windy-dashboard-autoopen.ps1"
+
+function New-AutoOpenScript {
+  @'
+# Auto-open the dashboard browser once the backend answers.
+# Usage:  powershell -File <this.ps1> <readyUrl> <openUrl> <timeoutSec>
+param(
+  [Parameter(Mandatory)][string]$ReadyUrl,
+  [Parameter(Mandatory)][string]$OpenUrl,
+  [int]$TimeoutSec = 120
+)
+$deadline = (Get-Date).AddSeconds($TimeoutSec)
+while ((Get-Date) -lt $deadline) {
+  try {
+    $r = Invoke-WebRequest -Uri $ReadyUrl -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+    if ($r.StatusCode -lt 500) {
+      Write-Host "[auto-open] $ReadyUrl is ready - opening $OpenUrl" -ForegroundColor Green
+      try { Start-Process $OpenUrl } catch { }
+      break
+    }
+  } catch { }
+  Start-Sleep -Milliseconds 700
+}
+'@ | Set-Content -Path $autoOpenPs1 -Encoding ASCII
+}
+
+if (-not $NoBrowser) { New-AutoOpenScript }
 
 # --- Resolve Python from venv ---------------------------------------------------
 function Get-VenvPython {
@@ -106,10 +146,18 @@ if ($Dev) {
   $beCmd = "Set-Location -LiteralPath '$be'; & '$venvPython' main.py"
   Start-Process powershell -ArgumentList "-NoExit","-Command",$beCmd
   $feCmd = "Set-Location -LiteralPath '$fe'; npm run dev"
+  if (-not $NoBrowser) {
+    # Launch the shared auto-open job from inside the frontend window so it can
+    # open the browser (5173) once the backend answers (8000).
+    $feCmd += "; Start-Job -FilePath '$autoOpenPs1' -ArgumentList 'http://127.0.0.1:8000','http://127.0.0.1:5173',120 | Out-Null"
+  }
   Start-Process powershell -ArgumentList "-NoExit","-Command",$feCmd
   Write-Host ""
   Write-Ok "Backend  → http://127.0.0.1:8000  (with /docs Swagger)"
   Write-Ok "Frontend → http://localhost:5173  (HMR + proxied to backend)"
+  if (-not $NoBrowser) {
+    Write-Ok "Browser will open automatically once the backend is up."
+  }
   Write-Host "  Close both PowerShell windows to stop."
   exit 0
 }
@@ -125,7 +173,10 @@ if (-not (Test-Path (Join-Path $fe "dist\index.html"))) {
 }
 
 Write-Step "Starting backend (binds 127.0.0.1:8000 only)"
-Write-Host "  Open http://127.0.0.1:8000 in your browser."
+if (-not $NoBrowser) {
+  Start-Job -FilePath $autoOpenPs1 -ArgumentList "http://127.0.0.1:8000","http://127.0.0.1:8000",120 | Out-Null
+  Write-Host "  Auto-open: browser will open once the server responds (use -NoBrowser to skip)."
+}
 Write-Host "  Press Ctrl+C to stop."
 Write-Host ""
 Push-Location $be
