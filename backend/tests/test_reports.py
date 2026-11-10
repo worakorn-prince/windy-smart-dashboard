@@ -6,7 +6,6 @@ Covers:
   - XSS escaping of process names / event details
   - list_reports ordering and prune_reports(keep)
   - API admin gating, days validation, download + traversal rejection
-  - DASH_REPORT_INTERVAL_HOURS parser (0/negative disables the scheduler)
 """
 from __future__ import annotations
 
@@ -288,23 +287,6 @@ def test_download_endpoint_never_serves_outside_dir(tmp_path, client, report_env
     r = client.get("/api/reports/report-20260105-000000-d1.html", headers=_auth())
 
     assert r.status_code == 404
-
-
-@pytest.mark.parametrize(("raw", "expected"), [
-    ("24", 24.0),
-    ("0", 0.0),
-    ("-1", 0.0),
-    ("0.5", 0.5),
-    ("bogus", 24.0),
-])
-def test_report_interval_parser(monkeypatch, raw, expected):
-    monkeypatch.setenv("DASH_REPORT_INTERVAL_HOURS", raw)
-    assert main._report_interval_hours() == expected
-
-
-def test_report_interval_parser_default(monkeypatch):
-    monkeypatch.delenv("DASH_REPORT_INTERVAL_HOURS", raising=False)
-    assert main._report_interval_hours() == 24.0
 
 
 if __name__ == "__main__":

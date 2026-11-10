@@ -25,6 +25,8 @@ Endpoints:
   GET /api/health/disk               — disk usage, SMART health, days-to-full
   POST /api/reports/generate         — generate daily/weekly HTML report (admin)
   GET /api/reports                   — list generated reports (admin)
+  GET /api/reports/schedule          — read report schedule + next run (admin)
+  PUT /api/reports/schedule          — update report schedule (admin, hot reload)
   GET /api/reports/{name}            — download one generated report (admin)
 """
 from __future__ import annotations
@@ -34,7 +36,6 @@ import contextlib
 import ipaddress
 import json
 import logging
-import os
 import platform
 import re
 import socket
@@ -484,36 +485,46 @@ async def _history_loop() -> None:
 
 
 _REPORT_STARTUP_DELAY = 300.0
+_REPORT_TICK_SECONDS = 60.0
+_REPORT_RETRY_SECONDS = 300.0
 
 
-def _report_interval_hours() -> float:
-    """Parse DASH_REPORT_INTERVAL_HOURS; <=0 disables scheduled reports."""
-    raw = os.environ.get("DASH_REPORT_INTERVAL_HOURS", "24")
+async def _report_tick(now: float) -> None:
+    """One scheduler tick: read the hot-reloaded schedule and run when due."""
+    schedule = await asyncio.to_thread(reports.get_schedule)
+    interval = float(schedule["intervalHours"]) * 3600.0
+    if not schedule["enabled"]:
+        reports.set_next_due(None)
+        return
+    due = reports.get_next_due()
+    if due is None:
+        reports.set_next_due(now + interval)
+        return
+    if now < due:
+        return
     try:
-        hours = float(raw)
-    except (TypeError, ValueError):
-        logger.warning("invalid DASH_REPORT_INTERVAL_HOURS=%r; using 24h", raw)
-        return 24.0
-    return hours if hours > 0 else 0.0
+        path = await asyncio.to_thread(reports.generate_report, schedule["days"])
+        await asyncio.to_thread(reports.prune_reports, reports.DEFAULT_KEEP)
+        logger.info("scheduled report written: %s", path)
+        reports.set_next_due(now + interval)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("scheduled report generation failed")
+        reports.set_next_due(now + _REPORT_RETRY_SECONDS)
 
 
 async def _report_loop() -> None:
-    """Generate a daily HTML report after a startup delay, then per interval."""
-    interval_hours = _report_interval_hours()
-    if interval_hours <= 0:
-        logger.info("scheduled reports disabled (DASH_REPORT_INTERVAL_HOURS<=0)")
-        return
+    """Check the schedule every 60s after a one-off startup delay."""
     await asyncio.sleep(_REPORT_STARTUP_DELAY)
     while True:
         try:
-            path = await asyncio.to_thread(reports.generate_report, 1)
-            await asyncio.to_thread(reports.prune_reports, reports.DEFAULT_KEEP)
-            logger.info("scheduled report written: %s", path)
+            await _report_tick(time.time())
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("scheduled report generation failed")
-        await asyncio.sleep(interval_hours * 3600)
+            logger.exception("report schedule loop error")
+        await asyncio.sleep(_REPORT_TICK_SECONDS)
 
 
 async def _quick_ping(host: str, timeout: float = 1.0) -> float | None:
@@ -664,6 +675,39 @@ async def api_reports_generate(
 async def api_reports_list(_admin: None = Depends(require_admin)) -> list[dict[str, Any]]:
     """List generated reports, newest first (admin-gated)."""
     return await asyncio.to_thread(reports.list_reports)
+
+
+@app.get("/api/reports/schedule")
+async def api_reports_schedule_get(_admin: None = Depends(require_admin)) -> dict[str, Any]:
+    """Current report schedule plus the next run timestamp (admin-gated)."""
+    schedule = await asyncio.to_thread(reports.get_schedule)
+    next_run = reports.get_next_due()
+    if next_run is None and schedule["enabled"]:
+        next_run = time.time() + float(schedule["intervalHours"]) * 3600.0
+    return {"ok": True, **schedule, "nextRun": next_run}
+
+
+@app.put("/api/reports/schedule")
+async def api_reports_schedule_put(
+    request: Request,
+    payload: dict[str, Any],
+    _admin: None = Depends(require_admin),
+) -> dict[str, Any]:
+    """Validate/persist the schedule and reschedule the running loop (admin)."""
+    if request.headers.get("x-requested-with") != "windy-dashboard":
+        raise HTTPException(status_code=403, detail="missing_origin_header")
+    try:
+        schedule = await asyncio.to_thread(reports.set_schedule, payload)
+    except reports.ScheduleWriteError as exc:
+        logger.exception("report schedule not persisted")
+        raise HTTPException(status_code=500, detail="schedule_not_persisted") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if schedule["enabled"]:
+        reports.set_next_due(time.time() + schedule["intervalHours"] * 3600.0)
+    else:
+        reports.set_next_due(None)
+    return {"ok": True, **schedule, "nextRun": reports.get_next_due()}
 
 
 @app.get("/api/reports/{name}")

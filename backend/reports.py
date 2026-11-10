@@ -7,9 +7,12 @@ report. All dynamic values are escaped with :func:`html.escape`.
 """
 from __future__ import annotations
 
+import contextlib
 import html
 import json
 import logging
+import math
+import os
 import re
 import sqlite3
 import time
@@ -25,6 +28,13 @@ REPORTS_DIR = Path(__file__).resolve().parent.parent / "reports"
 REPORT_NAME_RE = re.compile(r"^report-\d{8}-\d{6}-d(1|7)\.html$")
 ALLOWED_DAYS = (1, 7)
 DEFAULT_KEEP = 30
+
+SCHEDULE_PATH = config.CACHE_DIR / "report_schedule.json"
+DEFAULT_SCHEDULE: dict[str, Any] = {"enabled": True, "intervalHours": 24.0, "days": 1}
+MIN_INTERVAL_HOURS = 0.25
+MAX_INTERVAL_HOURS = 168.0
+
+_next_due: float | None = None
 
 _EVENT_LIMIT = 100
 _PROCESS_LIMIT = 10
@@ -386,3 +396,98 @@ def prune_reports(keep: int = DEFAULT_KEEP) -> int:
             continue
         removed += 1
     return removed
+
+
+def set_next_due(ts: float | None) -> None:
+    """Record the epoch timestamp of the next scheduled report run."""
+    global _next_due
+    _next_due = None if ts is None else float(ts)
+
+
+def get_next_due() -> float | None:
+    """Epoch timestamp of the next scheduled run (``None`` = not scheduled)."""
+    return _next_due
+
+
+def _normalize_schedule(payload: Any) -> dict[str, Any]:
+    """Validate one schedule payload and return the normalized dict."""
+    if not isinstance(payload, dict):
+        raise ValueError("schedule must be an object")  # noqa: TRY004 - endpoint maps it to 400
+    enabled = payload.get("enabled", DEFAULT_SCHEDULE["enabled"])
+    if not isinstance(enabled, bool):
+        raise ValueError("enabled must be a boolean")  # noqa: TRY004 - endpoint maps it to 400
+    interval = payload.get("intervalHours", DEFAULT_SCHEDULE["intervalHours"])
+    if isinstance(interval, bool) or not isinstance(interval, (int, float)):
+        raise ValueError("intervalHours must be a number")  # noqa: TRY004 - endpoint maps it to 400
+    interval = float(interval)
+    if not math.isfinite(interval) or not MIN_INTERVAL_HOURS <= interval <= MAX_INTERVAL_HOURS:
+        raise ValueError("intervalHours must be between 0.25 and 168")
+    days = payload.get("days", DEFAULT_SCHEDULE["days"])
+    if isinstance(days, bool) or not isinstance(days, int) or days not in ALLOWED_DAYS:
+        raise ValueError("days must be 1 or 7")
+    return {"enabled": enabled, "intervalHours": interval, "days": int(days)}
+
+
+def _env_schedule() -> dict[str, Any]:
+    """Fallback schedule derived from DASH_REPORT_INTERVAL_HOURS."""
+    raw = os.environ.get("DASH_REPORT_INTERVAL_HOURS", "24")
+    try:
+        hours = float(raw)
+    except (TypeError, ValueError):
+        logger.warning("invalid DASH_REPORT_INTERVAL_HOURS=%r; using 24h", raw)
+        return dict(DEFAULT_SCHEDULE)
+    if not math.isfinite(hours):
+        logger.warning("invalid DASH_REPORT_INTERVAL_HOURS=%r; using 24h", raw)
+        return dict(DEFAULT_SCHEDULE)
+    if hours <= 0:
+        return {"enabled": False, "intervalHours": float(DEFAULT_SCHEDULE["intervalHours"]), "days": 1}
+    return {
+        "enabled": True,
+        "intervalHours": min(max(hours, MIN_INTERVAL_HOURS), MAX_INTERVAL_HOURS),
+        "days": 1,
+    }
+
+
+def get_schedule() -> dict[str, Any]:
+    """Persisted schedule, or the env/default fallback when absent/broken."""
+    path = Path(SCHEDULE_PATH)
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return _env_schedule()
+    except OSError:
+        logger.warning("report schedule unreadable; using env fallback", exc_info=True)
+        return _env_schedule()
+    try:
+        return _normalize_schedule(json.loads(raw))
+    except ValueError:
+        logger.warning("report schedule corrupt; using env fallback", exc_info=True)
+        return _env_schedule()
+
+
+class ScheduleWriteError(RuntimeError):
+    """Raised when the schedule file cannot be persisted (maps to HTTP 500)."""
+
+
+def set_schedule(payload: Any) -> dict[str, Any]:
+    """Validate, persist and return the normalized schedule."""
+    current = get_schedule()
+    merged: dict[str, Any] = dict(current)
+    if isinstance(payload, dict):
+        for key in ("enabled", "intervalHours", "days"):
+            if key in payload:
+                merged[key] = payload[key]
+    elif payload is not None:
+        raise ValueError("schedule must be an object")
+    schedule = _normalize_schedule(merged)
+    path = Path(SCHEDULE_PATH)
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(schedule, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError as exc:
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
+        raise ScheduleWriteError(f"cannot persist schedule: {exc}") from exc
+    return schedule
