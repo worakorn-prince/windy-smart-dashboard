@@ -5,6 +5,71 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-11-11
+
+### Added
+
+- **Notification channels** (webhook + LINE Notify) in `backend/alerts.py`:
+  `await dispatch()` fans out best-effort to toast/webhook/LINE with a 5 s
+  timeout and no redirects; `POST /api/alerts/test` sends a sample and
+  `POST /api/alerts/notify` accepts external alerts behind a
+  `X-Requested-With: windy-dashboard` CSRF header. Webhook URLs are SSRF-guarded
+  (scheme+hostname validation, metadata/link-local blocked); `public_rules()`
+  masks the LINE token (`token_set` flag) and PUT without a `token` key keeps
+  the stored one.
+- **Customizable dashboard layout**: `composables/useLayout.ts` (move within a
+  zone, hide/show with a "never-empty" invariant, reset), persisted in
+  `localStorage['dash:layout:v1']`, with a layout toolbar on the Dashboard.
+- **`compare.py --notify`**: push agent regression alerts into the dashboard
+  (default URL honors `DASH_PORT`, `X-Admin-Token` attached when set).
+- **Scheduled security audit**: `backend/security/scheduled.py` (hot-reload
+  schedule, module lock, run-in-thread), `GET/PUT /api/security/audit/schedule`,
+  `POST /api/security/audit/schedule/run`, `GET /api/security/audits` history,
+  and an Audit History card on the Security page.
+- **PWA support**: `manifest.webmanifest`, hand-written `sw.js` (network-first
+  for navigations, bypass `/api`+`/ws`, stale-while-revalidate for assets),
+  `icon.svg`, mobile breakpoints, and production-only SW registration.
+- **Startup programs manager** (reversible): `backend/maintenance/startup.py`
+  lists HKCU/HKLM Run/RunOnce + startup folder, disables via PowerShell
+  registry providers with a backup store and rollback, requires the confirm
+  phrase `startup`; `GET /api/maintenance/startup`, `POST
+  /api/maintenance/startup/toggle`.
+- **Report scheduling from the UI**: `GET/PUT /api/reports/schedule` (hot
+  reload, `_report_tick()` with CSRF guard), next-run shown on Reports card.
+- **Windows Update status card**: `backend/maintenance/updates.py` reads
+  pending-reboot signals (CBS / WU / PendingFileRenameOperations), recent
+  hotfixes and last `wu-scan`; `GET/POST /api/maintenance/windows-update[/scan]`.
+- **In-app Agent Scope Board** at `/viewer`: `backend/viewer_api.py`
+  (`GET /api/viewer/{single,all,status}`, `POST /api/viewer/rebuild`), a new
+  Viewer page with KPI grid/task table/timeline/alerts.
+- **Battery card** (laptops), **GPU clock/VRAM % detail**, **OpenAPI metadata
+  + `GET /api/version` + `docs/API.md`**, **portable packaging
+  (`scripts/package_portable.py`, `docs/PACKAGING.md`)**, and a **Playwright
+  E2E smoke suite** (`frontend/e2e/`, CI job `e2e-smoke`).
+
+### Changed
+
+- `backend/maintenance/` module version bumped to `0.5.0`; `APP_VERSION` and
+  `frontend/package.json` are now `0.5.0`.
+- `backend/reports.py` schedule is now editable at runtime instead of env-only
+  (env `DASH_REPORT_INTERVAL_HOURS` remains the fallback when no file exists).
+- `GET /api/reports/schedule` always reports a `nextRun`; a corrupt schedule
+  file falls back to env/defaults; persistence errors map to 500, validation to
+  400.
+- Frontend test suite grew from 26 to 84 tests; backend from 228 to 411;
+  viewer/CLI from 32 to 40.
+
+### Security
+
+- SSRF guard on webhook delivery (metadata/link-local hosts blocked, redirects
+  disabled).
+- LINE Notify token never returned by `GET /api/alerts/rules`.
+- `POST /api/alerts/notify`, `PUT /api/reports/schedule`,
+  `POST /api/security/audit/schedule/run` and `POST /api/viewer/rebuild`
+  require `X-Requested-With: windy-dashboard`; admin-gated where they fire
+  outbound work.
+- Service worker never intercepts `/api` / `/ws` requests.
+
 ## [0.4.0] - 2026-10-21
 
 ### Added

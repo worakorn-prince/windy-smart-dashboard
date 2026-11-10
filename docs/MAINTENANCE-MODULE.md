@@ -1,6 +1,6 @@
 # MAINTENANCE-MODULE — แผนรวมโมดูล Maintenance (MERGE-001)
 
-> สถานะ: **implemented (release v0.3.1, module version 0.3.1)** — โค้ดจริงอยู่ที่ `backend/maintenance/` + หน้า `/maintenance`
+> สถานะ: **implemented (release v0.5.0, module version 0.5.0)** — โค้ดจริงอยู่ที่ `backend/maintenance/` + หน้า `/maintenance`
 > ขอบเขต: พอร์ตความสามารถของโปรเจกต์ `updater` (Node.js) มาเป็นโมดูลใน `Dashboard` (Python FastAPI + Vue3/TS)
 > หมายเหตุ: `relaunch` เปิดใช้งานแล้ว (FEAT-303) — ต้องส่ง `{"confirm":"relaunch"}` → `202` + detached helper + frontend poll จน reconnect (timeout 60 s); เดิมเคยปิดด้วย `501 RELAUNCH_DISABLED` ใน v0.3.0 (now superseded)
 

@@ -15,6 +15,16 @@ more.
 
 Built with FastAPI (Python 3.12) + Vue 3 / TypeScript / Vite.
 
+> ✨ **What's new in v0.5.0** — notification channels (generic webhook + LINE
+> Notify with SSRF guard and token masking), customizable dashboard layout
+> (move/hide/reset cards), scheduled security audits (hot-reloadable + history),
+> installable PWA (manifest, service worker, mobile breakpoints), report
+> scheduling from the UI (hot reload), a Windows Update & pending-reboot card,
+> a reversible startup-programs manager, an in-app **Agent Scope Board** at
+> `/viewer` (reads `scopeboard/*.json` and can rebuild them), portable
+> packaging (`scripts/package_portable.py`), an OpenAPI docs + `/api/version`
+> endpoint, and a Playwright E2E smoke suite.
+
 > ⚠️ The dashboard binds to `127.0.0.1` only — accessible from this
 > computer, not from the network. This is intentional and a security
 > feature.
@@ -405,10 +415,12 @@ environment variables:
 
 Windows housekeeping ported from the legacy `updater` project
 (`MERGE-005b`). The backend lives in `backend/maintenance/` (module version
-`0.3.1`: guards, 22 error codes, PowerShell runner, scanner cache 30 s,
-system cache 60 s, actions, cleaner, history, export, relaunch, router) and
-exposes device/driver scan status, action history, CSV/JSON export, a guarded
-cleaner for temp folders and the recycle bin, and a confirmed relaunch.
+`0.5.0`: guards, 22 error codes, PowerShell runner, scanner cache 30 s,
+system cache 60 s, actions, cleaner, history, export, relaunch,
+router). The module now also ships a revertible **startup programs manager**
+(`enable/disable` with a backup store + rollback) and a **Windows Update
+status card** (pending-reboot reasons, recent hotfixes, `wu-scan` results and
+re-scan trigger).
 
 | Method | Path | Purpose |
 |--------|------|---------|

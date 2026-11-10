@@ -48,7 +48,7 @@ This document describes how to build and run the **portable package** — a sing
 ### Build Command
 ```powershell
 # From repository root
-python scripts/package_portable.py --out dist/windy-dashboard-portable-v0.3.1.zip
+python scripts/package_portable.py --out dist/windy-dashboard-portable-v0.5.0.zip
 ```
 
 #### Options
@@ -68,9 +68,9 @@ Output:
 ```
 Portable package plan (dry-run, nothing written)
   name        : windy-smart-dashboard
-  version     : 0.3.1
+  version     : 0.5.0
   python      : 3.12.7
-  out         : D:\...\dist\windy-dashboard-portable-v0.3.1.zip
+  out         : D:\...\dist\windy-dashboard-portable-v0.5.0.zip
   files       : 247
   total size  : 12.4 MiB
   groups      :
@@ -97,7 +97,7 @@ Portable package plan (dry-run, nothing written)
 ### Steps
 ```powershell
 # 1. Extract the zip
-Expand-Archive windy-dashboard-portable-v0.3.1.zip -DestinationPath windy-dashboard
+Expand-Archive windy-dashboard-portable-v0.5.0.zip -DestinationPath windy-dashboard
 cd windy-dashboard
 
 # 2. Create virtual environment & install Python deps
@@ -124,7 +124,7 @@ Every package includes a `MANIFEST.json` as the **first entry** in the zip. Stru
 ```json
 {
   "name": "windy-smart-dashboard",
-  "version": "0.3.1",
+  "version": "0.5.0",
   "builtAt": "2026-11-11T12:34:56Z",
   "python": "3.12.7",
   "counts": { "files": 247, "totalBytes": 12987654 },
