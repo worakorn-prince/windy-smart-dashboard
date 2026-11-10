@@ -8,6 +8,7 @@ import CpuCard from '@/components/dashboard/CpuCard.vue'
 import RamCard from '@/components/dashboard/RamCard.vue'
 import GpuCard from '@/components/dashboard/GpuCard.vue'
 import PowerCard from '@/components/dashboard/PowerCard.vue'
+import BatteryCard from '@/components/dashboard/BatteryCard.vue'
 import DiskCard from '@/components/dashboard/DiskCard.vue'
 import HistoryCard from '@/components/dashboard/HistoryCard.vue'
 import NetworkCard from '@/components/dashboard/NetworkCard.vue'
@@ -39,6 +40,7 @@ onMounted(() => {
     </div>
     <div class="grid secondary-zone" data-testid="secondary-zone">
       <PowerCard />
+      <BatteryCard :battery="store.system?.battery ?? null" />
       <DiskCard :disk="store.disk" />
       <NetworkCard :network="store.network" :ping="store.ping" />
       <SystemCard :system="store.system" />
