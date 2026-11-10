@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { GpuSnapshot } from '@/stores/metrics'
+import type { GpuInfo, GpuSnapshot } from '@/stores/metrics'
 import { useMetricsStore, severityOf, SEVERITY_COLORS } from '@/stores/metrics'
 import { computed } from 'vue'
 
@@ -35,6 +35,22 @@ const vendorIcon = (v: string) => {
   if (v === 'Intel') return '🔵'
   return '🎮'
 }
+
+const vramPercent = (g: GpuInfo): string => {
+  if (g.vram_usage_percent != null) return `${g.vram_usage_percent.toFixed(1)}%`
+  if (g.vram_total_mb) return `${(((g.vram_used_mb ?? 0) / g.vram_total_mb) * 100).toFixed(1)}%`
+  return '—'
+}
+
+const clocksText = (g: GpuInfo): string => {
+  const core = g.graphics_clock_mhz
+  const mem = g.memory_clock_mhz
+  if (core == null && mem == null) return '—'
+  const fmt = (v: number | null | undefined) => (v == null ? '—' : String(v))
+  return `${fmt(core)} / ${fmt(mem)} MHz`
+}
+
+const vramFreeGb = (g: GpuInfo): string => (g.vram_free_mb == null ? '—' : `${(g.vram_free_mb / 1024).toFixed(1)} GB`)
 </script>
 
 <template>
@@ -62,10 +78,13 @@ const vendorIcon = (v: string) => {
           </div>
           <div class="row small" v-if="g.vram_total_mb">
             <span class="label">VRAM</span>
-            <span class="value">{{ g.vram_used_mb }} / {{ g.vram_total_mb }} MB</span>
+            <span class="value">
+              {{ g.vram_used_mb }} / {{ g.vram_total_mb }} MB
+              <span class="vram-pct" data-testid="gpu-vram-pct">{{ vramPercent(g) }}</span>
+            </span>
           </div>
           <div class="progress" v-if="g.vram_total_mb">
-            <div :style="{ width: ((g.vram_used_mb || 0) / g.vram_total_mb * 100) + '%', background: 'var(--info)' }"></div>
+            <div :style="{ width: (g.vram_usage_percent ?? ((g.vram_used_mb || 0) / g.vram_total_mb * 100)) + '%', background: 'var(--info)' }"></div>
           </div>
         </div>
 
@@ -91,13 +110,13 @@ const vendorIcon = (v: string) => {
             <span class="label">Power</span>
             <span class="value">{{ g.power_draw_watts }} W</span>
           </div>
-          <div class="info-row" v-if="g.graphics_clock_mhz != null">
-            <span class="label">Core Clock</span>
-            <span class="value">{{ g.graphics_clock_mhz }} MHz</span>
+          <div class="info-row" v-if="g.vram_free_mb != null">
+            <span class="label">VRAM Free</span>
+            <span class="value">{{ vramFreeGb(g) }}</span>
           </div>
-          <div class="info-row" v-if="g.memory_clock_mhz != null">
-            <span class="label">Mem Clock</span>
-            <span class="value">{{ g.memory_clock_mhz }} MHz</span>
+          <div class="info-row">
+            <span class="label">Clocks</span>
+            <span class="value" data-testid="gpu-clocks">{{ clocksText(g) }}</span>
           </div>
           <div class="info-row" v-if="g.resolution">
             <span class="label">Resolution</span>
@@ -155,6 +174,8 @@ const vendorIcon = (v: string) => {
 .info-row .value { font-size: 12px; font-weight: 500; word-break: break-word; line-height: 1.4; }
 
 .text-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.vram-pct { color: var(--muted); margin-left: 4px; font-variant-numeric: tabular-nums; }
 
 .text-sev-low { color: var(--good); }
 .text-sev-medium { color: var(--warn); }
