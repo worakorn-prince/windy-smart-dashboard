@@ -1,19 +1,28 @@
 import argparse
 import glob
+import http.client
+import importlib
 import io
 import json
 import os
 import sys
+import urllib.request
 from contextlib import redirect_stdout
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-import metrics as metrics_mod
+metrics_mod = importlib.import_module("metrics")
 
 METRICS_REL = os.path.join(".agent", "manager", "metrics.json")
 TOOLCALLS_GLOB = os.path.join(".agent", "**", "tool-calls.jsonl")
+
+DEFAULT_DASH_PORT = "8000"
+DEFAULT_NOTIFY_HOST = "127.0.0.1"
+NOTIFY_PATH = "/api/alerts/notify"
+NOTIFY_TIMEOUT = 5
+NOTIFY_TITLE = "Agent regression detected"
 
 THRESHOLDS = {
     "tool_calls": ("pct_increase", 20.0),
@@ -280,15 +289,72 @@ def format_markdown(result, base_dir=None, cand_dir=None):
     return "\n".join(lines)
 
 
+def _notify_message(result, base_dir=None, cand_dir=None):
+    regressions = result.get("regressions") or []
+    if not regressions:
+        return f"comparison failed between {base_dir} and {cand_dir}"
+    parts = []
+    for reg in regressions:
+        metric = reg.get("metric", "?")
+        pct = reg.get("delta_pct")
+        delta = reg.get("delta")
+        if pct is not None:
+            parts.append(f"{metric} {pct:+.1f}%")
+        elif isinstance(delta, (int, float)):
+            parts.append(f"{metric} {delta:+g}")
+        else:
+            parts.append(metric)
+    return f"{len(regressions)} regression(s): {', '.join(parts)}"
+
+
+def default_notify_url(env=None):
+    source = os.environ if env is None else env
+    port = (source.get("DASH_PORT") or "").strip() or DEFAULT_DASH_PORT
+    return f"http://{DEFAULT_NOTIFY_HOST}:{port}{NOTIFY_PATH}"
+
+
+def notify(url, result, base_dir, cand_dir):
+    body = {
+        "title": NOTIFY_TITLE,
+        "message": _notify_message(result, base_dir, cand_dir),
+        "severity": "warning",
+        "source": "compare",
+        "regressions": result.get("regressions") or [],
+    }
+    data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "X-Requested-With": "windy-dashboard",
+    }
+    token = os.environ.get("DASH_ADMIN_TOKEN")
+    if token:
+        headers["X-Admin-Token"] = token
+    try:
+        request = urllib.request.Request(
+            url, data=data, method="POST", headers=headers)
+        with urllib.request.urlopen(request, timeout=NOTIFY_TIMEOUT) as response:
+            response.read()
+        return True
+    except (OSError, ValueError, http.client.HTTPException) as exc:
+        print(f"[compare] notify failed: {exc}", file=sys.stderr)
+        return False
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Compare two agent-viewer runs and flag metric regressions")
     parser.add_argument("--base", required=True,
-                        help="Base run dir (.agent/manager/metrics.json or .agent/**/tool-calls.jsonl)")
+                        help="Base run dir (.agent/manager/metrics.json "
+                             "or .agent/**/tool-calls.jsonl)")
     parser.add_argument("--cand", required=True,
-                        help="Candidate run dir (.agent/manager/metrics.json or .agent/**/tool-calls.jsonl)")
+                        help="Candidate run dir (.agent/manager/metrics.json "
+                             "or .agent/**/tool-calls.jsonl)")
     parser.add_argument("--json", action="store_true", dest="as_json",
                         help="Emit machine-readable JSON instead of a markdown table")
+    parser.add_argument("--notify", nargs="?", const="",
+                        default=None, metavar="URL",
+                        help="POST regressions to the dashboard alert endpoint "
+                             f"(default: {default_notify_url()}, port from DASH_PORT)")
     args = parser.parse_args(argv)
     try:
         base_payload = load_dataset(args.base)
@@ -305,6 +371,8 @@ def main(argv=None):
         print(json.dumps(output, indent=2, ensure_ascii=False))
     else:
         print(format_markdown(result, base_dir=base_dir, cand_dir=cand_dir))
+    if args.notify is not None and result["status"] != "PASS":
+        notify(args.notify or default_notify_url(), result, base_dir, cand_dir)
     return 0 if result["status"] == "PASS" else 1
 
 

@@ -1096,5 +1096,187 @@ class TestCost(unittest.TestCase):
             self._run(["--root", self.root, "--pricing", broken])[0], 2)
 
 
+class _NotifyStub:
+    def __init__(self):
+        import http.server
+        import threading
+
+        self.requests = []
+        stub = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length") or 0)
+                raw = self.rfile.read(length) if length else b"{}"
+                stub.requests.append({
+                    "path": self.path,
+                    "headers": {k.lower(): v for k, v in self.headers.items()},
+                    "body": json.loads(raw),
+                })
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"ok": true}')
+
+            def log_message(self, *args):
+                pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.thread = threading.Thread(target=self.server.serve_forever,
+                                       daemon=True)
+
+    @property
+    def url(self):
+        return (f"http://127.0.0.1:{self.server.server_address[1]}"
+                "/api/alerts/notify")
+
+    def __enter__(self):
+        self.thread.start()
+        return self
+
+    def __exit__(self, *exc_info):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=5)
+        return False
+
+
+class TestCompareNotify(unittest.TestCase):
+    ENV_KEYS = ("DASH_PORT", "DASH_ADMIN_TOKEN")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self._saved_env = {k: os.environ.pop(k) for k in self.ENV_KEYS
+                           if k in os.environ}
+
+    def tearDown(self):
+        for key in self.ENV_KEYS:
+            os.environ.pop(key, None)
+        os.environ.update(self._saved_env)
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _payload(tasks, done, failed, calls, tokens, success_rate=None):
+        terminal = done + failed
+        if success_rate is None:
+            success_rate = (done / terminal) if terminal else 0.0
+        totals = {"tasks": tasks, "done": done, "failed": failed,
+                  "cancelled": 0, "success_rate": success_rate,
+                  "tool_calls": calls, "tokens_total": tokens,
+                  "denied_attempts": 0}
+        return {"totals": totals, "per_task": {}}
+
+    def _write_dataset(self, name, payload):
+        root = os.path.join(self.tmp.name, name)
+        mgr = os.path.join(root, ".agent", "manager")
+        os.makedirs(mgr)
+        with open(os.path.join(mgr, "metrics.json"), "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        return root
+
+    def _run(self, args):
+        out, err = StringIO(), StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = compare_mod.main(args)
+        return code, out.getvalue(), err.getvalue()
+
+    def _regression_dirs(self):
+        base = self._write_dataset("base", self._payload(
+            10, 9, 0, 100, 1000, success_rate=0.9))
+        cand = self._write_dataset("cand", self._payload(
+            10, 7, 2, 150, 1500, success_rate=0.7))
+        return base, cand
+
+    def test_notify_skipped_on_pass(self):
+        base = self._write_dataset("same", self._payload(4, 4, 0, 20, 200))
+        with _NotifyStub() as stub:
+            code, out, _ = self._run(
+                ["--base", base, "--cand", base, "--notify", stub.url, "--json"])
+            self.assertEqual(stub.requests, [])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["status"], "PASS")
+
+    def test_notify_posts_on_regression(self):
+        base, cand = self._regression_dirs()
+        with _NotifyStub() as stub:
+            code, _, _ = self._run(
+                ["--base", base, "--cand", cand, "--notify", stub.url])
+            self.assertEqual(len(stub.requests), 1)
+            request = stub.requests[0]
+        self.assertEqual(code, 1)
+        self.assertEqual(request["path"], "/api/alerts/notify")
+        self.assertEqual(request["headers"].get("x-requested-with"),
+                         "windy-dashboard")
+        self.assertIn("application/json",
+                      request["headers"].get("content-type", ""))
+        body = request["body"]
+        self.assertEqual(body["source"], "compare")
+        self.assertEqual(body["severity"], "warning")
+        self.assertEqual(body["title"], "Agent regression detected")
+        self.assertIsInstance(body["regressions"], list)
+        self.assertTrue(body["regressions"])
+        self.assertIn("regression(s)", body["message"])
+
+    def test_default_url_uses_dash_port_env(self):
+        self.assertEqual(compare_mod.default_notify_url({}),
+                         "http://127.0.0.1:8000/api/alerts/notify")
+        self.assertEqual(compare_mod.default_notify_url({"DASH_PORT": "8123"}),
+                         "http://127.0.0.1:8123/api/alerts/notify")
+
+    def test_notify_without_url_uses_dash_port_env(self):
+        base, cand = self._regression_dirs()
+        with _NotifyStub() as stub:
+            os.environ["DASH_PORT"] = str(stub.server.server_address[1])
+            code, _, _ = self._run(
+                ["--base", base, "--cand", cand, "--notify"])
+            self.assertEqual(len(stub.requests), 1)
+            self.assertEqual(stub.requests[0]["path"], "/api/alerts/notify")
+        self.assertEqual(code, 1)
+
+    def test_notify_sends_admin_token_header(self):
+        base, cand = self._regression_dirs()
+        with _NotifyStub() as stub:
+            os.environ["DASH_ADMIN_TOKEN"] = "secret"
+            code, _, _ = self._run(
+                ["--base", base, "--cand", cand, "--notify", stub.url])
+            self.assertEqual(code, 1)
+            self.assertEqual(len(stub.requests), 1)
+            headers = stub.requests[0]["headers"]
+        self.assertEqual(headers.get("x-admin-token"), "secret")
+
+    def test_notify_omits_admin_token_when_env_missing(self):
+        base, cand = self._regression_dirs()
+        with _NotifyStub() as stub:
+            code, _, _ = self._run(
+                ["--base", base, "--cand", cand, "--notify", stub.url])
+            self.assertEqual(code, 1)
+            headers = stub.requests[0]["headers"]
+        self.assertNotIn("x-admin-token", headers)
+
+    def test_notify_closed_port_keeps_exit_code(self):
+        import socket
+
+        base, cand = self._regression_dirs()
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        url = f"http://127.0.0.1:{port}/api/alerts/notify"
+        code, out, err = self._run(
+            ["--base", base, "--cand", cand, "--notify", url, "--json"])
+        self.assertEqual(code, 1)
+        self.assertIn("notify failed", err)
+        self.assertEqual(json.loads(out)["status"], "REGRESSION")
+        with redirect_stderr(StringIO()):
+            self.assertFalse(
+                compare_mod.notify(url, {"regressions": []}, base, cand))
+
+    def test_no_notify_flag_sends_nothing(self):
+        base, cand = self._regression_dirs()
+        with _NotifyStub() as stub:
+            code, _, _ = self._run(["--base", base, "--cand", cand])
+            self.assertEqual(stub.requests, [])
+        self.assertEqual(code, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

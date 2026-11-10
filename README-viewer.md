@@ -65,7 +65,7 @@ scripts/
   compare.py         # base vs candidate run comparison (regression gate)
   cost.py            # token/cost per model (+ --budget gate)
   retention.py       # archive old JSONL rows to .agent/archive/
-  test_logging.py    # 32 tests
+  test_logging.py    # 40 tests
 scopeboard/
   index.html         # single-project view (5 charts + 17 tables)
   all.html           # cross-project view (6 charts + 20 tables)
@@ -92,10 +92,19 @@ page refreshes every 5 s. Without `auto=1` the page loads data once.
 ```powershell
 python scripts/compare.py --base .\runs\before --cand .\runs\after
 python scripts/compare.py --base .\runs\before --cand .\runs\after --json
+python scripts/compare.py --base .\runs\before --cand .\runs\after --notify
+python scripts/compare.py --base .\runs\before --cand .\runs\after --notify http://127.0.0.1:8000/api/alerts/notify
 ```
 
 `--base`/`--cand` accept a project dir containing `.agent/` (metrics.json or
 tool-calls.jsonl) — exit code 2 means invalid/missing input.
+
+`--notify` posts a `warning` alert (source `compare`) to the dashboard endpoint
+only when the result is `REGRESSION`; the default URL is
+`http://127.0.0.1:8000/api/alerts/notify`, with the port taken from
+`DASH_PORT` (default `8000`) at runtime. If `DASH_ADMIN_TOKEN` is set, the
+request carries an `X-Admin-Token` header. A failed POST prints
+`[compare] notify failed: ...` on stderr but never changes the exit code.
 
 ## Cost analytics
 
