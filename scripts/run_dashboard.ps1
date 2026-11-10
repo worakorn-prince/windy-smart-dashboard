@@ -29,7 +29,7 @@ try {
     }
     if (-not $Port) { throw "no free port in 8080..8090" }
 
-    Write-Host "[4/4] Serving dashboard at http://localhost:$Port/dashboard/ ..."
+    Write-Host "[4/4] Serving dashboard at http://localhost:$Port/scopeboard/ ..."
     $job = Start-Job -ScriptBlock {
         Set-Location -LiteralPath $using:Root
         & python -m http.server $using:Port
@@ -44,7 +44,7 @@ try {
             if (-not $ready) { Start-Sleep -Milliseconds 200 }
         }
         if (-not $ready) { throw "server did not start on port $Port" }
-        Start-Process "http://localhost:$Port/dashboard/all.html"
+        Start-Process "http://localhost:$Port/scopeboard/all.html"
         Write-Host "Browser opened. Press Ctrl+C in this window to stop the server."
         Wait-Job -Job $job | Out-Null
     } finally {

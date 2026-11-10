@@ -96,7 +96,7 @@ def bench_scale(n_calls, tmpbase):
         t0 = time.perf_counter()
         metrics_mod.rebuild()
         t_rebuild = time.perf_counter() - t0
-        out_data = os.path.join(projs[0], "dashboard", "data.json")
+        out_data = os.path.join(projs[0], "scopeboard", "data.json")
         t0 = time.perf_counter()
         export_mod.export_data(
             out_data, metrics_path=os.path.join(mgr0, "metrics.json"),

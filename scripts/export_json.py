@@ -16,7 +16,7 @@ CONFIG_FILE = os.path.join(MANAGER_DIR, "config.json")
 REVIEWS_DIR = os.path.join(MANAGER_DIR, "reviews")
 HISTORY_DIR = os.path.join(MANAGER_DIR, "history")
 CHECKPOINT_FILE = os.path.join(ROOT, ".agent", "building", "checkpoint.json")
-DEFAULT_OUT = os.path.join(ROOT, "dashboard", "data.json")
+DEFAULT_OUT = os.path.join(ROOT, "scopeboard", "data.json")
 
 try:
     from tools_inventory import build_tools_section
@@ -431,7 +431,7 @@ def export_data(out_path, metrics_path=METRICS_FILE, events_path=EVENTS_FILE,
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Export metrics.json + events.jsonl to dashboard/data.json")
+    parser = argparse.ArgumentParser(description="Export metrics.json + events.jsonl to scopeboard/data.json")
     parser.add_argument("--out", default=DEFAULT_OUT, help="Output data.json path")
     parser.add_argument("--metrics", default=METRICS_FILE, help="Input metrics.json path")
     parser.add_argument("--events", default=EVENTS_FILE, help="Input events.jsonl path")

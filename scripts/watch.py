@@ -47,7 +47,7 @@ def rebuild(root):
     toolcalls_path = os.path.join(manager_dir, "tool-calls.jsonl")
     metrics_path = os.path.join(manager_dir, "metrics.json")
     history_dir = os.path.join(manager_dir, "history")
-    out_path = os.path.join(root, "dashboard", "data.json")
+    out_path = os.path.join(root, "scopeboard", "data.json")
     saved = (metrics_mod.MANAGER_DIR, metrics_mod.EVENTS_FILE,
              metrics_mod.TOOLCALLS_FILE, metrics_mod.METRICS_FILE,
              metrics_mod.HISTORY_DIR)
@@ -87,7 +87,7 @@ def cycle(root, prev):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Watch .agent/**/tool-calls.jsonl + events.jsonl, rebuild dashboard/data.json on change")
+        description="Watch .agent/**/tool-calls.jsonl + events.jsonl, rebuild scopeboard/data.json on change")
     parser.add_argument("--interval", type=float, default=DEFAULT_INTERVAL,
                         help="Poll interval in seconds (default 2.0)")
     parser.add_argument("--once", action="store_true",

@@ -139,14 +139,14 @@ def print_next_steps(root, info, data_out, agg_out):
     print("")
     print("To open the dashboard with this demo data:")
     print("  1. copy the two JSON files over the dashboard's runtime copies:")
-    print('       copy /Y "%s" dashboard\\data.json' % data_out)
-    print('       copy /Y "%s" dashboard\\all-projects.json' % agg_out)
+    print('       copy /Y "%s" scopeboard\\data.json' % data_out)
+    print('       copy /Y "%s" scopeboard\\all-projects.json' % agg_out)
     print("     (overwrites current dashboard data - skip to keep real data)")
     print("  2. serve over http (fetch() is blocked on file://):")
     print("       python -m http.server")
     print("  3. open:")
-    print("       http://localhost:8000/dashboard/index.html   (single-project view)")
-    print("       http://localhost:8000/dashboard/all.html     (combined view)")
+    print("       http://localhost:8000/scopeboard/index.html   (single-project view)")
+    print("       http://localhost:8000/scopeboard/all.html     (combined view)")
 
 
 def main(argv=None):

@@ -14,16 +14,16 @@ run_dashboard.bat
 
 - `--demo` seeds sample data first → the browser opens with charts populated
 - If real data already exists (`./.agent/`), drop `--demo` (the script never touches existing files)
-- The browser opens the **combined view** (`dashboard/all.html`); the
-  **single-project view** is `dashboard/index.html`
+- The browser opens the **combined view** (`scopeboard/all.html`); the
+  **single-project view** is `scopeboard/index.html`
 
 ## Manual run (without the one-click script)
 
 ```powershell
 python scripts/metrics.py --rebuild   # compute from .agent/manager/*.jsonl
-python scripts/export_json.py         # → dashboard/data.json (single view)
-python scripts/aggregate.py           # → dashboard/all-projects.json (combined view)
-python -m http.server                 # open dashboard/*.html over http (do not open file:// directly, fetch gets blocked)
+python scripts/export_json.py         # → scopeboard/data.json (single view)
+python scripts/aggregate.py           # → scopeboard/all-projects.json (combined view)
+python -m http.server                 # open scopeboard/*.html over http (do not open file:// directly, fetch gets blocked)
 ```
 
 ## Log schema (the only contract to follow)
@@ -57,16 +57,16 @@ same 3 commands and the dashboards light up.
 scripts/
   manager.py         # Optional Python logging API (log_tool_call / save_review)
   metrics.py         # 6 metrics + daily history/ snapshots
-  export_json.py     # metrics+events → dashboard/data.json (15 sections)
-  aggregate.py       # cross-project merge → dashboard/all-projects.json (--projects A,B,C)
+  export_json.py     # metrics+events → scopeboard/data.json (15 sections)
+  aggregate.py       # cross-project merge → scopeboard/all-projects.json (--projects A,B,C)
   tools_inventory.py # 16-tool catalog x agent permissions (optional) x actual usage
   bootstrap.py       # init .agent/ skeleton (+ --demo sample data)
-  watch.py           # live tail: rebuild dashboard/data.json when JSONL changes
+  watch.py           # live tail: rebuild scopeboard/data.json when JSONL changes
   compare.py         # base vs candidate run comparison (regression gate)
   cost.py            # token/cost per model (+ --budget gate)
   retention.py       # archive old JSONL rows to .agent/archive/
   test_logging.py    # 32 tests
-dashboard/
+scopeboard/
   index.html         # single-project view (5 charts + 17 tables)
   all.html           # cross-project view (6 charts + 20 tables)
 ```
@@ -74,14 +74,14 @@ dashboard/
 ## Live tail
 
 `watch.py` polls `.agent/**/tool-calls.jsonl` and `events.jsonl` and rebuilds
-`dashboard/data.json` whenever a file changes (default every 2 s):
+`scopeboard/data.json` whenever a file changes (default every 2 s):
 
 ```powershell
 python scripts/watch.py --root . --interval 2   # Ctrl+C to stop
 python scripts/watch.py --root . --once         # single check cycle, then exit
 ```
 
-Open `dashboard/index.html?auto=1` — the header shows a **LIVE** badge and the
+Open `scopeboard/index.html?auto=1` — the header shows a **LIVE** badge and the
 page refreshes every 5 s. Without `auto=1` the page loads data once.
 
 ## Run comparison

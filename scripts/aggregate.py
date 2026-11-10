@@ -1,9 +1,9 @@
 """aggregate.py — รวมข้อมูลวัดผลข้ามโปรเจกต์เป็นจอเดียว (read-only).
 
 อ่าน metrics.json + events.jsonl + tool-calls.jsonl + queue.json + reviews/ +
-history/ + checkpoint ของแต่ละโปรเจกต์ แล้วเขียน dashboard/all-projects.json
+history/ + checkpoint ของแต่ละโปรเจกต์ แล้วเขียน scopeboard/all-projects.json
 ค่า default: ["Agent", "mcp", "Dashboard"] ใต้โฟลเดอร์แม่ของรีโปนี้ (ย้ายรีโปได้)
-ใช้: python scripts/aggregate.py [--projects A,B,C] [--out dashboard/all-projects.json]
+ใช้: python scripts/aggregate.py [--projects A,B,C] [--out scopeboard/all-projects.json]
 """
 import os
 import sys
@@ -16,7 +16,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 ROOT = os.path.dirname(HERE)               # repo root ของรีโปที่สคริปต์นี้อยู่
 BASE = os.path.dirname(ROOT)               # D:/Coding_Project (หรือที่ไหนก็ได้)
-DEFAULT_OUT = os.path.join(ROOT, "dashboard", "all-projects.json")
+DEFAULT_OUT = os.path.join(ROOT, "scopeboard", "all-projects.json")
 OUT_DEFAULT = DEFAULT_OUT
 TIMELINE_CAP = 500
 

@@ -308,7 +308,7 @@ class TestLoggingIsolated(unittest.TestCase):
         self.assertIn("matrix", on_disk["tools"])
 
     def test_f_dashboard_static(self):
-        html_path = os.path.join(ROOT, "dashboard", "index.html")
+        html_path = os.path.join(ROOT, "scopeboard", "index.html")
         self.assertTrue(os.path.exists(html_path))
         with open(html_path, "r", encoding="utf-8") as f:
             html = f.read()
@@ -332,7 +332,7 @@ class TestLoggingIsolated(unittest.TestCase):
         self.assertIn("contract-box", html)
 
     def test_f2_all_projects_static(self):
-        html_path = os.path.join(ROOT, "dashboard", "all.html")
+        html_path = os.path.join(ROOT, "scopeboard", "all.html")
         self.assertTrue(os.path.exists(html_path))
         with open(html_path, "r", encoding="utf-8") as f:
             html = f.read()
@@ -736,7 +736,7 @@ class TestWatch(unittest.TestCase):
         self.assertEqual(len(snap), 2)
         prev, changed = watch_mod.cycle(self.root, None)
         self.assertTrue(changed)
-        out = os.path.join(self.root, "dashboard", "data.json")
+        out = os.path.join(self.root, "scopeboard", "data.json")
         self.assertTrue(os.path.exists(out))
         with open(out, "r", encoding="utf-8") as f:
             data = json.load(f)

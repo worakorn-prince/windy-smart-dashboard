@@ -34,7 +34,7 @@ Thumbs.db
 README.th.md
 design.md
 
-# Agent tool-call logging + dashboard (runtime, per-project)
+# Agent tool-call logging + scopeboard (runtime, per-project)
 .agent/
-dashboard/data.json
-dashboard/all-projects.json
+scopeboard/data.json
+scopeboard/all-projects.json
