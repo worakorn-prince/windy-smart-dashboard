@@ -25,6 +25,10 @@ Built with FastAPI (Python 3.12) + Vue 3 / TypeScript / Vite.
 > packaging (`scripts/package_portable.py`), an OpenAPI docs + `/api/version`
 > endpoint, and a Playwright E2E smoke suite.
 
+> ✨ **What's new in v0.5.1** — `run.ps1` now opens the dashboard in your
+> default browser automatically once the server is ready (a `-NoBrowser` switch
+> disables it; dev mode waits for the backend then opens the Vite URL).
+
 > ⚠️ The dashboard binds to `127.0.0.1` only — accessible from this
 > computer, not from the network. This is intentional and a security
 > feature.
@@ -415,7 +419,7 @@ environment variables:
 
 Windows housekeeping ported from the legacy `updater` project
 (`MERGE-005b`). The backend lives in `backend/maintenance/` (module version
-`0.5.0`: guards, 22 error codes, PowerShell runner, scanner cache 30 s,
+`0.5.1`: guards, 22 error codes, PowerShell runner, scanner cache 30 s,
 system cache 60 s, actions, cleaner, history, export, relaunch,
 router). The module now also ships a revertible **startup programs manager**
 (`enable/disable` with a backup store + rollback) and a **Windows Update

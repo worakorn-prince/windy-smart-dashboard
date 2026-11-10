@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-11-11
+
+### Changed
+
+- `run.ps1` launcher now auto-opens the dashboard in your default browser once
+  the backend answers (polls the backend until ready; in `-Dev` mode it waits
+  for the backend then opens `http://127.0.0.1:5173`). A `-NoBrowser` switch
+  disables the behaviour; the auto-open helper lives in
+  `%TEMP%\windy-dashboard-autoopen.ps1` and is regenerated on each launch.
+- `APP_VERSION`, the maintenance `MODULE_VERSION`, `frontend/package.json` and
+  `frontend/package-lock.json` bumped to `0.5.1`.
+
 ## [0.5.0] - 2026-11-11
 
 ### Added

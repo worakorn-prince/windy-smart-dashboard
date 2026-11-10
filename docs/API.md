@@ -14,7 +14,7 @@ Local-only HTTP/WebSocket API ของแดชบอร์ด (FastAPI) เอ
 | `http://127.0.0.1:8000/openapi.json` | OpenAPI 3 schema (ใช้ generate client) |
 
 `info.title` = `Windy Smart Dashboard`, `info.version` = `APP_VERSION` ใน `backend/main.py`
-(ปัจจุบัน `0.5.0`) — ตรงกับฟิลด์ `version` ของ `GET /api/version`
+(ปัจจุบัน `0.5.1`) — ตรงกับฟิลด์ `version` ของ `GET /api/version`
 
 > ⚠️ **Bind `127.0.0.1` เท่านั้น** — เซิร์ฟเวอร์ฟังเฉพาะ loopback ไม่เปิดให้เครื่องอื่นในเน็ตเวิร์ก
 > เข้าถึง (โดยดีไซน์) ถ้าต้องการเข้าจากระยะไกลให้ใช้ SSH tunnel / port-forward ผ่าน loopback

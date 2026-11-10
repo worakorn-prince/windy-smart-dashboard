@@ -163,7 +163,7 @@ load_suspicious()
 
 
 # ---- FastAPI app ---- #
-APP_VERSION = "0.5.0"
+APP_VERSION = "0.5.1"
 
 _APP_DESCRIPTION = (
     "Local-only real-time monitoring dashboard for Windows (CPU, RAM, disk, network, processes). "

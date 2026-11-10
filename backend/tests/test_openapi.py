@@ -39,7 +39,7 @@ def test_openapi_metadata(schema):
     info = schema["info"]
 
     assert "Windy" in info["title"]
-    assert info["version"] == "0.5.0"
+    assert info["version"] == "0.5.1"
     assert info.get("description")
 
 
@@ -59,7 +59,7 @@ def test_version_endpoint(client, schema):
     assert r.status_code == 200
     payload = r.json()
     assert payload["name"] == "windy-smart-dashboard"
-    assert payload["version"] == "0.5.0"
+    assert payload["version"] == "0.5.1"
     assert payload["version"] == schema["info"]["version"]
     assert isinstance(payload["python"], str) and payload["python"]
     assert isinstance(payload["platform"], str) and payload["platform"]
