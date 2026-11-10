@@ -26,6 +26,13 @@ export interface PersistedSecurityEvent {
   detail: any
 }
 
+export interface AuditSchedule {
+  enabled: boolean
+  intervalHours: number
+  last_run?: string | null
+  next_due?: number | null
+}
+
 const MAX_EVENTS = 200
 
 const ADMIN_TOKEN_KEY = 'dash_admin_token'
@@ -41,6 +48,8 @@ function loadAdminToken(): string {
 export const useSecurityStore = defineStore('security', () => {
   const events = ref<SecurityEvent[]>([])
   const securityEvents = ref<PersistedSecurityEvent[]>([])
+  const scheduledAudits = ref<PersistedSecurityEvent[]>([])
+  const auditSchedule = ref<AuditSchedule | null>(null)
   const audit = ref<AuditReport | null>(null)
   const auditRunning = ref(false)
   const suspiciousCountries = ref<string[]>([])
@@ -175,6 +184,110 @@ export const useSecurityStore = defineStore('security', () => {
     }
   }
 
+  function applySchedulePayload(data: any) {
+    auditSchedule.value = {
+      enabled: Boolean(data.enabled),
+      intervalHours: Number(data.intervalHours) || 24,
+      last_run: data.last_run ?? null,
+      next_due: typeof data.next_due === 'number' ? data.next_due : null,
+    }
+  }
+
+  async function loadAuditSchedule(): Promise<{ ok: boolean; reason?: string }> {
+    try {
+      const resp = await fetch('/api/security/audit/schedule')
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok || data.ok === false) {
+        return { ok: false, reason: data.reason || data.detail || `Failed to load schedule (${resp.status})` }
+      }
+      applySchedulePayload(data)
+      return { ok: true }
+    } catch (err: any) {
+      console.error('Failed to load audit schedule', err)
+      return { ok: false, reason: 'Failed to load audit schedule' }
+    }
+  }
+
+  async function saveAuditSchedule(
+    payload: { enabled: boolean; intervalHours: number },
+  ): Promise<{ ok: boolean; reason?: string }> {
+    try {
+      const resp = await fetch('/api/security/audit/schedule', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok || data.ok === false) {
+        return { ok: false, reason: data.reason || data.detail || `Failed to save schedule (${resp.status})` }
+      }
+      applySchedulePayload(data)
+      return { ok: true }
+    } catch (err: any) {
+      console.error('Failed to save audit schedule', err)
+      return { ok: false, reason: 'Failed to save audit schedule' }
+    }
+  }
+
+  async function runScheduledAudit(): Promise<{ ok: boolean; reason?: string; skipped?: string }> {
+    try {
+      const resp = await fetch('/api/security/audit/schedule/run', {
+        method: 'POST',
+        headers: { ...authHeaders(), 'X-Requested-With': 'windy-dashboard' },
+      })
+      if (resp.status === 401) {
+        return { ok: false, reason: 'Unauthorized (401): admin token missing or invalid — set it in Security Settings' }
+      }
+      if (resp.status === 403) {
+        const body = await resp.json().catch(() => ({}))
+        if (body.detail === 'missing_origin_header') {
+          return { ok: false, reason: 'Forbidden (403): missing X-Requested-With header (reload the page and retry)' }
+        }
+        return { ok: false, reason: 'Forbidden (403): audit runs are allowed from localhost only' }
+      }
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok || data.ok === false) {
+        return { ok: false, reason: data.reason || data.detail || `Audit failed (${resp.status})` }
+      }
+      if (data.skipped) {
+        await loadAuditSchedule()
+        return { ok: true, skipped: String(data.skipped) }
+      }
+      await loadAuditSchedule()
+      return { ok: true }
+    } catch (err: any) {
+      console.error('Scheduled audit run failed', err)
+      return { ok: false, reason: 'Scheduled audit run failed' }
+    }
+  }
+
+  async function loadScheduledAudits(
+    limit = 20,
+  ): Promise<{ ok: boolean; reason?: string; count?: number }> {
+    try {
+      const resp = await fetch(`/api/security/audits?limit=${limit}`, { headers: authHeaders() })
+      if (resp.status === 401 || resp.status === 403) {
+        scheduledAudits.value = []
+        return {
+          ok: false,
+          reason: resp.status === 401
+            ? 'Unauthorized (401): admin token missing or invalid — set it in Security Settings'
+            : 'Forbidden (403): scheduled audit history is allowed from localhost only',
+        }
+      }
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok || data.ok === false) {
+        scheduledAudits.value = []
+        return { ok: false, reason: data.reason || data.detail || `Failed to load audits (${resp.status})` }
+      }
+      scheduledAudits.value = Array.isArray(data.audits) ? data.audits : []
+      return { ok: true, count: scheduledAudits.value.length }
+    } catch (err: any) {
+      console.error('Failed to load scheduled audit history', err)
+      return { ok: false, reason: 'Failed to load scheduled audit history' }
+    }
+  }
+
   async function killProcess(pid: number) {
     const resp = await fetch('/api/security/kill', {
       method: 'POST',
@@ -231,8 +344,10 @@ export const useSecurityStore = defineStore('security', () => {
   }
 
   return {
-    events, securityEvents, audit, auditRunning, suspiciousCountries, adminToken,
+    events, securityEvents, scheduledAudits, auditSchedule, audit, auditRunning,
+    suspiciousCountries, adminToken,
     connect, loadSuspicious, loadSecurityEvents, saveSuspicious, runAudit,
+    loadAuditSchedule, saveAuditSchedule, runScheduledAudit, loadScheduledAudits,
     setAdminToken, clearAdminToken,
     killProcess, blockIp, unblockRule, listBlocked, exportReport,
   }

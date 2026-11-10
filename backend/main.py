@@ -79,6 +79,7 @@ from security import actions
 from security import audit as audit_mod
 from security import monitor as sec_monitor
 from security import persistence as sec_persistence
+from security import scheduled as scheduled_audit
 
 # ---- logging ---- #
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -189,12 +190,13 @@ async def lifespan(app: FastAPI):
     uptime_task = asyncio.create_task(_uptime_loop())
     history_task = asyncio.create_task(_history_loop())
     report_task = asyncio.create_task(_report_loop())
+    audit_task = asyncio.create_task(scheduled_audit.audit_loop())
     try:
         yield
     finally:
         if sec_mon:
             await sec_mon.stop()
-        for t in (metrics_task, process_task, uptime_task, history_task, report_task):
+        for t in (metrics_task, process_task, uptime_task, history_task, report_task, audit_task):
             t.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await t
@@ -773,6 +775,52 @@ async def api_audit() -> dict[str, Any]:
     """Run an audit synchronously and return the full report."""
     report = await audit_mod.run_audit(suspicious_override=list(suspicious_countries_state))
     return report
+
+
+def _schedule_payload(schedule: dict[str, Any]) -> dict[str, Any]:
+    return {"ok": True, **schedule,
+            "last_run": scheduled_audit.get_last_run(),
+            "next_due": scheduled_audit.get_next_due()}
+
+
+@app.get("/api/security/audit/schedule")
+async def api_get_audit_schedule() -> dict[str, Any]:
+    """Current scheduled-audit configuration plus last/next run markers."""
+    return _schedule_payload(scheduled_audit.get_schedule())
+
+
+@app.put("/api/security/audit/schedule")
+async def api_put_audit_schedule(payload: dict[str, Any]) -> dict[str, Any]:
+    """Update the scheduled-audit configuration (validated, hot-reloaded)."""
+    try:
+        schedule = scheduled_audit.set_schedule(payload)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    return _schedule_payload(schedule)
+
+
+@app.post("/api/security/audit/schedule/run")
+async def api_run_scheduled_audit(
+    request: Request,
+    _admin: None = Depends(require_admin),
+) -> dict[str, Any]:
+    """Run the audit now and persist a compact summary (admin + CSRF header)."""
+    if request.headers.get(NOTIFY_HEADER) != NOTIFY_HEADER_VALUE:
+        raise HTTPException(status_code=403, detail="missing_origin_header")
+    summary = await scheduled_audit.run_and_store(
+        suspicious_override=list(suspicious_countries_state),
+    )
+    return {"ok": True, **summary}
+
+
+@app.get("/api/security/audits")
+async def api_security_audits(
+    limit: int = Query(default=20, ge=1, le=200),
+    _admin: None = Depends(require_admin),
+) -> dict[str, Any]:
+    """Persisted scheduled-audit results, newest first (admin-gated)."""
+    audits = await asyncio.to_thread(sec_persistence.list_events, limit, scheduled_audit.KIND)
+    return {"ok": True, "audits": audits}
 
 
 @app.post("/api/security/kill")

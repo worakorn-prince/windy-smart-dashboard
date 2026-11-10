@@ -93,32 +93,38 @@ def record_event(kind: str, source_ip: str, detail: dict[str, Any] | None = None
         return False
 
 
-def list_events(limit: int = 50) -> list[dict[str, Any]]:
-    """Return up to `limit` events, newest first, with detail parsed back to dict."""
+def list_events(limit: int = 50, kind: str | None = None) -> list[dict[str, Any]]:
+    """Return up to `limit` events, newest first, with detail parsed back to dict.
+
+    When `kind` is given only events of that kind are returned.
+    """
     try:
         n = max(0, min(int(limit), _MAX_LIST_LIMIT))
     except (TypeError, ValueError):
         n = 50
+    sql = "SELECT id, ts, kind, source_ip, detail FROM security_events"
+    params: list[Any] = []
+    if kind:
+        sql += " WHERE kind = ?"
+        params.append(str(kind))
+    sql += " ORDER BY ts DESC, id DESC LIMIT ?"
+    params.append(n)
     try:
         with _lock:
             conn = _get_conn()
-            rows = conn.execute(
-                "SELECT id, ts, kind, source_ip, detail FROM security_events "
-                "ORDER BY ts DESC, id DESC LIMIT ?",
-                (n,),
-            ).fetchall()
+            rows = conn.execute(sql, params).fetchall()
     except Exception:
         _reset_conn()
         logger.warning("security events not listed", exc_info=True)
         return []
     events: list[dict[str, Any]] = []
-    for row_id, ts, kind, ip, raw in rows:
+    for row_id, ts, row_kind, ip, raw in rows:
         try:
             detail = json.loads(raw) if raw else {}
         except (TypeError, ValueError):
             detail = {"raw": raw}
         if not isinstance(detail, dict):
             detail = {"value": detail}
-        events.append({"id": row_id, "ts": ts, "kind": kind,
+        events.append({"id": row_id, "ts": ts, "kind": row_kind,
                        "source_ip": ip, "detail": detail})
     return events

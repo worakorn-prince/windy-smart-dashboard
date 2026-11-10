@@ -2,6 +2,7 @@
 import { onMounted } from 'vue'
 import { useSecurityStore } from '@/stores/security'
 import AuditCard from '@/components/security/AuditCard.vue'
+import AuditHistoryCard from '@/components/security/AuditHistoryCard.vue'
 import PortsCard from '@/components/security/PortsCard.vue'
 import ConnectionsCard from '@/components/security/ConnectionsCard.vue'
 import DefenderCard from '@/components/security/DefenderCard.vue'
@@ -31,6 +32,7 @@ onMounted(() => {
 
     <div class="grid">
       <AuditCard />
+      <AuditHistoryCard />
       <DefenderCard />
     </div>
 
