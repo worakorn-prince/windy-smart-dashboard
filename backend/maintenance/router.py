@@ -20,7 +20,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 
-from . import actions, cleaner, export
+from . import actions, cleaner, export, startup
 from . import history as action_log
 from .guards import require_allowed_host, require_csrf
 from .scanner import scan
@@ -159,6 +159,41 @@ async def scan_endpoint(refresh: int = 0) -> dict[str, object]:
 async def history_endpoint(limit: int = 100) -> dict[str, object]:
     rows = action_log.query(limit=max(1, min(int(limit or 100), 500)))
     return {"ok": True, "rows": rows, "count": len(rows), "servedAt": _now_iso()}
+
+
+@router.get("/startup", dependencies=[_ALLOWED_HOST])
+async def startup_list() -> dict[str, object]:
+    try:
+        result = await startup.list_startup()
+    except startup.StartupError as exc:
+        raise _write_error("startup", exc) from exc
+    except Exception as exc:
+        raise _read_error("startup", exc) from exc
+    body: dict[str, object] = dict(result)
+    body.update(
+        {
+            "ok": True,
+            "module": MODULE_NAME,
+            "stage": MODULE_STAGE,
+            "servedAt": _now_iso(),
+        }
+    )
+    return body
+
+
+@router.post("/startup/toggle", dependencies=_WRITE_GUARDS)
+async def startup_toggle(
+    payload: Annotated[dict[str, Any] | None, Body()] = None,
+) -> dict[str, Any]:
+    data = payload or {}
+    try:
+        return await startup.set_enabled(
+            str(data.get("id") or ""),
+            data.get("enabled"),
+            str(data.get("confirm") or ""),
+        )
+    except startup.StartupError as exc:
+        raise _write_error("startup", exc) from exc
 
 
 @router.post("/action", dependencies=_WRITE_GUARDS)
