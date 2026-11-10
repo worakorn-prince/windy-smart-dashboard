@@ -44,6 +44,24 @@ async function save() {
 }
 
 const saveDisabled = computed(() => !draft.value || store.alertRulesSaving)
+
+const testSummary = computed(() => {
+  const r = store.alertTestResult
+  if (!r) return ''
+  const entries = Object.entries(r.channels ?? {})
+  if (!entries.length) return 'No channel enabled'
+  return entries.map(([name, ok]) => `${name} ${ok ? '✓' : '✗'}`).join(', ')
+})
+
+const testFailed = computed(() => {
+  const r = store.alertTestResult
+  if (!r) return false
+  return Object.values(r.channels ?? {}).some(ok => !ok)
+})
+
+async function sendTest() {
+  await store.sendAlertTest()
+}
 </script>
 
 <template>
@@ -91,14 +109,44 @@ const saveDisabled = computed(() => !draft.value || store.alertRulesSaving)
         </label>
       </div>
 
+      <div class="channel-block">
+        <div class="ch-title">Webhook</div>
+        <div class="ch-row">
+          <label class="ch">
+            <input v-model="draft.channels.webhook.enabled" type="checkbox" @change="markDirty" />
+            Enabled
+          </label>
+          <input v-model.trim="draft.channels.webhook.url" type="url" class="url"
+                 placeholder="https://example.com/hook" @input="markDirty" />
+        </div>
+        <div class="ch-title">LINE Notify</div>
+        <div class="ch-row">
+          <label class="ch">
+            <input v-model="draft.channels.line.enabled" type="checkbox" @change="markDirty" />
+            Enabled
+          </label>
+          <input v-model.trim="draft.channels.line.token" type="password" class="url"
+                 placeholder="token" autocomplete="off" @input="markDirty" />
+          <input v-model.trim="draft.channels.line.target" type="text" class="url"
+                 placeholder="target (optional)" @input="markDirty" />
+        </div>
+      </div>
+
       <div class="actions">
         <button class="save" :disabled="saveDisabled" @click="save">
           {{ store.alertRulesSaving ? 'Saving…' : 'Save' }}
+        </button>
+        <button class="save" :disabled="store.alertTesting" @click="sendTest">
+          {{ store.alertTesting ? 'Sending…' : 'Send test' }}
         </button>
         <span v-if="savedFlash" class="ok small">Saved ✓</span>
         <span v-else-if="store.alertRulesError" class="err small">{{ store.alertRulesError }}</span>
         <span v-else-if="dirty" class="muted small">Unsaved changes</span>
       </div>
+      <div v-if="store.alertTestResult" class="small" :class="testFailed ? 'err' : 'ok'">
+        Test: {{ testSummary }}
+      </div>
+      <div v-else-if="store.alertTestError" class="err small">Test failed: {{ store.alertTestError }}</div>
     </template>
   </div>
 </template>
@@ -112,6 +160,11 @@ const saveDisabled = computed(() => !draft.value || store.alertRulesSaving)
 .limit { width: 80px; }
 .channels { display: flex; gap: 16px; margin-top: 10px; }
 .ch { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+.channel-block { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.ch-title { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+.ch-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.url { flex: 1 1 160px; min-width: 0; background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; font-size: 12px; }
 .actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
 .save { cursor: pointer; }
 .save:disabled { opacity: 0.5; cursor: default; }

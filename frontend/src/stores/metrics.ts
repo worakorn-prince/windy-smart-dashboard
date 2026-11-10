@@ -217,14 +217,47 @@ export interface AlertRule {
   enabled: boolean
 }
 
+export interface WebhookChannel {
+  enabled: boolean
+  url: string
+}
+
+export interface LineChannel {
+  enabled: boolean
+  token: string
+  token_set?: boolean
+  target: string
+}
+
 export interface AlertChannels {
   toast: boolean
   sound: boolean
+  webhook: WebhookChannel
+  line: LineChannel
 }
 
 export interface AlertRulesPayload {
   rules: AlertRule[]
   channels: AlertChannels
+}
+
+export interface AlertTestResult {
+  ok: boolean
+  channels: Record<string, boolean>
+}
+
+export function normalizeAlertChannels(raw?: Partial<AlertChannels> | null): AlertChannels {
+  return {
+    toast: raw?.toast ?? true,
+    sound: raw?.sound ?? false,
+    webhook: { enabled: raw?.webhook?.enabled ?? false, url: raw?.webhook?.url ?? '' },
+    line: {
+      enabled: raw?.line?.enabled ?? false,
+      token: raw?.line?.token ?? '',
+      token_set: raw?.line?.token_set ?? false,
+      target: raw?.line?.target ?? '',
+    },
+  }
 }
 
 export type SeverityLevel = 'ok' | 'warn' | 'crit'
@@ -254,6 +287,39 @@ export const SEVERITY_COLORS: Record<SeverityLevel, string> = {
   ok: '#5fd97c',
   warn: '#ffd75f',
   crit: '#ff6b6b',
+}
+
+const ADMIN_TOKEN_KEY = 'dashboard:adminToken'
+
+function jsonHeaders(withAdmin = false): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (withAdmin) {
+    try {
+      const token = sessionStorage.getItem(ADMIN_TOKEN_KEY)
+      if (token) headers['X-Admin-Token'] = token
+    } catch {
+      // sessionStorage unavailable (privacy mode) — request stays unauthenticated.
+    }
+  }
+  return headers
+}
+
+function rulesPayloadBody(payload: AlertRulesPayload): Record<string, unknown> {
+  const line: Record<string, unknown> = {
+    enabled: payload.channels.line.enabled,
+    target: payload.channels.line.target,
+  }
+  // An empty field means "keep the stored token"; only a typed value is sent.
+  if (payload.channels.line.token) line.token = payload.channels.line.token
+  return {
+    rules: payload.rules,
+    channels: {
+      toast: payload.channels.toast,
+      sound: payload.channels.sound,
+      webhook: { ...payload.channels.webhook },
+      line,
+    },
+  }
 }
 
 export const useMetricsStore = defineStore('metrics', () => {
@@ -335,6 +401,9 @@ export const useMetricsStore = defineStore('metrics', () => {
   const alertRules = ref<AlertRulesPayload | null>(null)
   const alertRulesSaving = ref(false)
   const alertRulesError = ref<string | null>(null)
+  const alertTesting = ref(false)
+  const alertTestResult = ref<AlertTestResult | null>(null)
+  const alertTestError = ref<string | null>(null)
 
   let audioCtx: AudioContext | null = null
 
@@ -375,10 +444,42 @@ export const useMetricsStore = defineStore('metrics', () => {
     try {
       const resp = await fetch('/api/alerts/rules')
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-      alertRules.value = await resp.json()
+      const data = await resp.json()
+      alertRules.value = {
+        rules: Array.isArray(data?.rules) ? data.rules : [],
+        channels: normalizeAlertChannels(data?.channels),
+      }
       alertRulesError.value = null
     } catch (err: any) {
       alertRulesError.value = String(err?.message ?? err)
+    }
+  }
+
+  async function sendAlertTest(): Promise<boolean> {
+    alertTesting.value = true
+    alertTestError.value = null
+    alertTestResult.value = null
+    try {
+      const resp = await fetch('/api/alerts/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Test alert',
+          message: 'Test notification from Windy Smart Dashboard',
+        }),
+      })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json()
+      alertTestResult.value = {
+        ok: data?.ok ?? true,
+        channels: (data?.channels ?? {}) as Record<string, boolean>,
+      }
+      return true
+    } catch (err: any) {
+      alertTestError.value = String(err?.message ?? err)
+      return false
+    } finally {
+      alertTesting.value = false
     }
   }
 
@@ -395,7 +496,11 @@ export const useMetricsStore = defineStore('metrics', () => {
         const detail = await resp.json().catch(() => null)
         throw new Error(String(detail?.detail ?? `HTTP ${resp.status}`))
       }
-      alertRules.value = await resp.json()
+      const data = await resp.json()
+      alertRules.value = {
+        rules: Array.isArray(data?.rules) ? data.rules : [],
+        channels: normalizeAlertChannels(data?.channels),
+      }
       return true
     } catch (err: any) {
       alertRulesError.value = String(err?.message ?? err)
@@ -428,7 +533,8 @@ export const useMetricsStore = defineStore('metrics', () => {
     cpuHistory, ramHistory, netSendHistory, netRecvHistory,
     speedtest, speedtestRunning,
     alerts, alertRules, alertRulesSaving, alertRulesError,
+    alertTesting, alertTestResult, alertTestError,
     cpuOverall, ramPercent, sensorStatus,
-    connect, runSpeedtest, dismissAlert, loadAlertRules, saveAlertRules,
+    connect, runSpeedtest, dismissAlert, loadAlertRules, saveAlertRules, sendAlertTest,
   }
 })

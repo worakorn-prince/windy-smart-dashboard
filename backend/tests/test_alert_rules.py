@@ -37,7 +37,9 @@ def test_default_seed_when_file_missing():
     assert by_id["ram_pct"]["threshold"] == config.ALERT_RAM_PCT
     assert by_id["disk_full"]["threshold"] == config.ALERT_DISK_PCT
     assert all(r["op"] == ">=" and r["enabled"] is True for r in rules["rules"])
-    assert rules["channels"] == {"toast": True, "sound": False}
+    assert rules["channels"] == alerts._default_channels()
+    assert rules["channels"]["webhook"] == {"enabled": False, "url": ""}
+    assert rules["channels"]["line"] == {"enabled": False, "token": "", "target": ""}
 
 
 def test_default_seed_tracks_config(monkeypatch):
@@ -120,9 +122,11 @@ def test_set_rules_persists_and_loads_back():
 
 
 def test_channels_hot_reload():
-    assert alerts.get_channels() == {"toast": True, "sound": False}
+    assert alerts.get_channels() == alerts._default_channels()
     alerts.set_rules(_valid_payload(channels={"toast": False, "sound": True}))
-    assert alerts.get_channels() == {"toast": False, "sound": True}
+    channels = alerts.get_channels()
+    assert channels["toast"] is False
+    assert channels["sound"] is True
 
 
 # ---- API ---- #
@@ -132,7 +136,12 @@ def test_api_get_rules_defaults(client):
     assert r.status_code == 200
     body = r.json()
     assert len(body["rules"]) == 4
-    assert body["channels"] == {"toast": True, "sound": False}
+    channels = body["channels"]
+    assert channels["toast"] is True
+    assert channels["sound"] is False
+    assert channels["webhook"] == {"enabled": False, "url": ""}
+    assert channels["line"]["token"] == ""
+    assert channels["line"]["token_set"] is False
 
 
 def test_api_put_rules_ok(client):
@@ -160,4 +169,6 @@ def test_api_put_rules_invalid_metric_400(client):
 def test_api_put_then_get_roundtrip(client):
     client.put("/api/alerts/rules", json=_valid_payload(channels={"toast": False, "sound": True}))
     r = client.get("/api/alerts/rules")
-    assert r.json()["channels"] == {"toast": False, "sound": True}
+    channels = r.json()["channels"]
+    assert channels["toast"] is False
+    assert channels["sound"] is True

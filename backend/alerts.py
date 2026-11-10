@@ -13,11 +13,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
+import ipaddress
 import json
 import logging
 import math
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from collections.abc import Callable
 from typing import Any
 
@@ -53,6 +58,56 @@ _METRIC_UNITS = {"cpu_temp": "°C", "gpu_temp": "°C", "ram_pct": "%", "disk_pct
 # None => use defaults derived from config thresholds (legacy behavior).
 _rules: dict[str, Any] | None = None
 
+# Notification delivery (best-effort, stdlib only).
+HTTP_TIMEOUT = 5.0
+LINE_NOTIFY_URL = "https://notify-api.line.me/api/notify"
+WEBHOOK_URL_MAX = 2048
+LINE_FIELD_MAX = 200
+
+# Cloud metadata endpoints: never a legitimate webhook target (SSRF guard).
+BLOCKED_WEBHOOK_HOSTS = frozenset({
+    "169.254.169.254",
+    "100.100.100.200",
+    "metadata",
+    "metadata.google.internal",
+})
+BLOCKED_WEBHOOK_NETWORKS = (
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("fe80::/10"),
+)
+
+
+def _validate_webhook_url(url: str) -> str:
+    """Reject non-http(s) and link-local/metadata webhook targets.
+
+    Loopback and LAN addresses stay allowed on purpose: this dashboard runs on
+    the user's own machine and a webhook to ``http://192.168.1.10/hook`` (home
+    automation, local Home Assistant, ...) is a supported use case.
+    """
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError("channels.webhook.url must be an absolute http(s) URL")
+    host = parts.hostname.lower()
+    if host in BLOCKED_WEBHOOK_HOSTS:
+        raise ValueError("channels.webhook.url host is not allowed")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return url
+    if any(address in network for network in BLOCKED_WEBHOOK_NETWORKS):
+        raise ValueError("channels.webhook.url host is not allowed")
+    return url
+
+
+def _default_channels() -> dict[str, Any]:
+    """Full channel schema; webhook/LINE stay off unless configured."""
+    return {
+        "toast": True,
+        "sound": False,
+        "webhook": {"enabled": False, "url": ""},
+        "line": {"enabled": False, "token": "", "target": ""},
+    }
+
 
 def _default_rules() -> dict[str, Any]:
     """Seed rules from the historical hardcoded thresholds in config."""
@@ -67,12 +122,15 @@ def _default_rules() -> dict[str, Any]:
             {"id": "disk_full", "metric": "disk_pct", "op": ">=",
              "threshold": config.ALERT_DISK_PCT, "enabled": True},
         ],
-        "channels": {"toast": True, "sound": False},
+        "channels": _default_channels(),
     }
 
 
-def _validate_rules_payload(payload: Any) -> dict[str, Any]:
+def _validate_rules_payload(payload: Any, existing_line_token: str = "") -> dict[str, Any]:
     """Validate a rules+channels payload; returns the normalized copy.
+
+    ``existing_line_token`` is reused when the payload omits ``line.token`` so
+    the UI can save rules without ever receiving the stored secret.
 
     Type mismatches raise ValueError (not TypeError) on purpose: the API layer
     maps ValueError to HTTP 400 for malformed client payloads.
@@ -112,13 +170,54 @@ def _validate_rules_payload(payload: Any) -> dict[str, Any]:
     raw_channels = payload.get("channels", {})
     if not isinstance(raw_channels, dict):
         raise ValueError("channels must be an object")  # noqa: TRY004 -- ValueError -> HTTP 400
-    defaults = _default_rules()["channels"]
-    channels: dict[str, bool] = {}
+    defaults = _default_channels()
+    channels: dict[str, Any] = {}
     for key in ("toast", "sound"):
         v = raw_channels.get(key, defaults[key])
         if not isinstance(v, bool):
             raise ValueError(f"channels.{key} must be a boolean")  # noqa: TRY004 -- ValueError -> HTTP 400
         channels[key] = v
+
+    raw_webhook = raw_channels.get("webhook", defaults["webhook"])
+    if not isinstance(raw_webhook, dict):
+        raise ValueError("channels.webhook must be an object")  # noqa: TRY004 -- ValueError -> HTTP 400
+    webhook_enabled = raw_webhook.get("enabled", False)
+    if not isinstance(webhook_enabled, bool):
+        raise ValueError("channels.webhook.enabled must be a boolean")  # noqa: TRY004 -- ValueError -> HTTP 400
+    webhook_url = raw_webhook.get("url", "")
+    if not isinstance(webhook_url, str):
+        raise ValueError("channels.webhook.url must be a string")  # noqa: TRY004 -- ValueError -> HTTP 400
+    webhook_url = webhook_url.strip()
+    if len(webhook_url) > WEBHOOK_URL_MAX:
+        raise ValueError(f"channels.webhook.url must be at most {WEBHOOK_URL_MAX} chars")
+    if webhook_enabled:
+        _validate_webhook_url(webhook_url)
+    channels["webhook"] = {"enabled": webhook_enabled, "url": webhook_url}
+
+    raw_line = raw_channels.get("line", defaults["line"])
+    if not isinstance(raw_line, dict):
+        raise ValueError("channels.line must be an object")  # noqa: TRY004 -- ValueError -> HTTP 400
+    line_enabled = raw_line.get("enabled", False)
+    if not isinstance(line_enabled, bool):
+        raise ValueError("channels.line.enabled must be a boolean")  # noqa: TRY004 -- ValueError -> HTTP 400
+    # Omitting the token key keeps the stored secret; an explicit "" clears it.
+    if "token" in raw_line:
+        raw_token = raw_line.get("token")
+        if not isinstance(raw_token, str):
+            raise ValueError("channels.line.token must be a string")
+        line_token = raw_token.strip()
+        if len(line_token) > LINE_FIELD_MAX:
+            raise ValueError(f"channels.line.token must be at most {LINE_FIELD_MAX} chars")
+    else:
+        line_token = existing_line_token
+    raw_target = raw_line.get("target", "")
+    if not isinstance(raw_target, str):
+        raise ValueError("channels.line.target must be a string")  # noqa: TRY004 -- ValueError -> HTTP 400
+    line_target = raw_target.strip()
+    if len(line_target) > LINE_FIELD_MAX:
+        raise ValueError(f"channels.line.target must be at most {LINE_FIELD_MAX} chars")
+    channels["line"] = {"enabled": line_enabled, "token": line_token, "target": line_target}
+
     return {"rules": rules, "channels": channels}
 
 
@@ -141,15 +240,43 @@ def get_rules() -> dict[str, Any]:
     return _rules if _rules is not None else _default_rules()
 
 
-def get_channels() -> dict[str, bool]:
-    """Notification channels (toast/sound) from the effective rules."""
-    return dict(get_rules()["channels"])
+def get_channels() -> dict[str, Any]:
+    """Notification channels (toast/sound/webhook/line) from the effective rules."""
+    raw = get_rules().get("channels") or {}
+    merged = _default_channels()
+    merged["toast"] = bool(raw.get("toast", merged["toast"]))
+    merged["sound"] = bool(raw.get("sound", merged["sound"]))
+    for name in ("webhook", "line"):
+        extra = raw.get(name)
+        if isinstance(extra, dict):
+            merged[name] = {**merged[name], **extra}
+    return merged
+
+
+def public_rules() -> dict[str, Any]:
+    """Effective rules with the LINE token redacted (never leaves the machine)."""
+    rules = copy.deepcopy(get_rules())
+    channels = get_channels()
+    line = channels.get("line") or {}
+    rules["channels"] = {
+        "toast": channels["toast"],
+        "sound": channels["sound"],
+        "webhook": dict(channels.get("webhook") or {}),
+        "line": {
+            "enabled": bool(line.get("enabled")),
+            "token": "",
+            "token_set": bool(line.get("token")),
+            "target": str(line.get("target") or ""),
+        },
+    }
+    return rules
 
 
 def set_rules(payload: dict[str, Any]) -> dict[str, Any]:
     """Validate, hot-reload in memory and persist rules to disk."""
     global _rules
-    validated = _validate_rules_payload(payload)
+    existing_line_token = str((get_channels().get("line") or {}).get("token") or "")
+    validated = _validate_rules_payload(payload, existing_line_token=existing_line_token)
     _rules = validated
     RULES_PATH.write_text(json.dumps(_rules, indent=2), encoding="utf-8")
     logger.info("alert rules updated (%d rules)", len(_rules["rules"]))
@@ -196,6 +323,142 @@ async def send_toast(title: str, message: str) -> None:
             await asyncio.wait_for(proc.wait(), timeout=8)
     except Exception as exc:
         logger.debug("toast failed: %s", exc)
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects so a webhook cannot be bounced to another target."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
+def _log_target(url: str) -> str:
+    """Host-only label for logs (query strings may carry secrets)."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        return f"{parts.scheme}://{parts.netloc}"
+    except Exception:
+        return "webhook"
+
+
+def _post(url: str, body: bytes, headers: dict[str, str]) -> bool:
+    """Blocking POST helper; returns True on a 2xx response, never raises."""
+    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    try:
+        with _OPENER.open(req, timeout=HTTP_TIMEOUT) as resp:
+            status = getattr(resp, "status", 200)
+            if 300 <= status < 400:
+                logger.warning("notification POST to %s rejected: HTTP %s (no redirects)",
+                               _log_target(url), status)
+                return False
+            resp.read()
+        return True
+    except urllib.error.HTTPError as exc:
+        logger.warning("notification POST to %s failed: HTTP %s",
+                       _log_target(url), exc.code)
+        return False
+    except Exception as exc:
+        logger.warning("notification POST to %s failed: %s", _log_target(url), exc)
+        return False
+
+
+async def send_webhook(url: str, payload: dict[str, Any]) -> bool:
+    """POST one JSON payload to a generic webhook; never raises."""
+    if not isinstance(url, str):
+        return False
+    try:
+        _validate_webhook_url(url)
+    except ValueError as exc:
+        logger.warning("webhook blocked: %s", exc)
+        return False
+    body = json.dumps(payload, default=str).encode("utf-8")
+    try:
+        return await asyncio.to_thread(
+            _post, url, body, {"Content-Type": "application/json"})
+    except Exception as exc:
+        logger.warning("webhook dispatch failed: %s", exc)
+        return False
+
+
+async def send_line(token: str, message: str) -> bool:
+    """Send one LINE Notify message; never raises."""
+    if not isinstance(token, str) or not token.strip():
+        return False
+    body = urllib.parse.urlencode({"message": message}).encode("utf-8")
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Authorization": f"Bearer {token.strip()}",
+    }
+    try:
+        return await asyncio.to_thread(_post, LINE_NOTIFY_URL, body, headers)
+    except Exception as exc:
+        logger.warning("line notify dispatch failed: %s", exc)
+        return False
+
+
+def _webhook_payload(alert: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": alert.get("id", ""),
+        "title": alert.get("title", ""),
+        "message": alert.get("message", ""),
+        "value": alert.get("value"),
+        "threshold": alert.get("threshold"),
+        "ts": alert.get("ts", time.time()),
+        "severity": alert.get("severity"),
+        "regressions": alert.get("regressions") or [],
+        "source": str(alert.get("source") or "dashboard"),
+    }
+
+
+async def dispatch(alert: dict[str, Any]) -> dict[str, bool]:
+    """Fan one alert out to every enabled channel; never raises.
+
+    The returned mapping only contains channels that were attempted, mapped to
+    whether delivery succeeded.
+    """
+    results: dict[str, bool] = {}
+    try:
+        channels = get_channels()
+    except Exception as exc:
+        logger.warning("channel lookup failed: %s", exc)
+        return results
+
+    title = str(alert.get("title", ""))
+    message = str(alert.get("message", ""))
+
+    if channels.get("toast", True):
+        try:
+            await send_toast(title, message)
+            results["toast"] = True
+        except Exception as exc:
+            logger.warning("toast dispatch failed: %s", exc)
+            results["toast"] = False
+
+    webhook = channels.get("webhook") or {}
+    if webhook.get("enabled"):
+        try:
+            results["webhook"] = await send_webhook(
+                str(webhook.get("url", "")), _webhook_payload(alert))
+        except Exception as exc:
+            logger.warning("webhook dispatch failed: %s", exc)
+            results["webhook"] = False
+
+    line = channels.get("line") or {}
+    if line.get("enabled"):
+        text = f"{title}: {message}" if title and not message.startswith(title) else message
+        try:
+            results["line"] = await send_line(str(line.get("token", "")), text)
+        except Exception as exc:
+            logger.warning("line dispatch failed: %s", exc)
+            results["line"] = False
+
+    if results and not all(results.values()):
+        logger.warning("alert delivery failed on: %s",
+                       [name for name, ok in results.items() if not ok])
+    return results
 
 
 def _check(rule_id: str, title: str, value: float | None,

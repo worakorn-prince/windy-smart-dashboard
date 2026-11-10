@@ -9,6 +9,8 @@ Endpoints:
   POST /api/speedtest     — run Internet speed test
   GET /api/alerts/rules   — effective alert rules + channels
   PUT /api/alerts/rules   — replace rules+channels (validated, hot-reload)
+  POST /api/alerts/test   — dispatch a sample alert to all enabled channels (admin)
+  POST /api/alerts/notify — accept an external alert (admin + X-Requested-With)
   GET /api/security/suspicious      — current suspicious countries
   PUT /api/security/suspicious      — override (persisted to cache)
   POST /api/security/audit           — run an on-demand audit
@@ -59,10 +61,9 @@ import process_history
 import reports
 import speedtest_worker
 from alerts import (
+    dispatch as dispatch_alert,
     evaluate as evaluate_alerts,
-    get_channels as get_alert_channels,
-    get_rules as get_alert_rules,
-    send_toast,
+    public_rules as public_alert_rules,
     set_rules as set_alert_rules,
 )
 from config import (
@@ -434,6 +435,26 @@ async def _uptime_loop() -> None:
         await asyncio.sleep(UPTIME_INTERVAL)
 
 
+_alert_tasks: set[asyncio.Task[Any]] = set()
+
+
+def _alert_task_done(task: asyncio.Task[Any]) -> None:
+    """Drop the finished task and surface unexpected errors."""
+    _alert_tasks.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning("alert dispatch task failed: %s", exc)
+
+
+def _dispatch_in_background(alert: dict[str, Any]) -> None:
+    """Deliver an alert without blocking the caller (up to ~18s of HTTP/toast)."""
+    task = asyncio.create_task(dispatch_alert(alert))
+    _alert_tasks.add(task)
+    task.add_done_callback(_alert_task_done)
+
+
 async def _history_loop() -> None:
     """Persist one metrics sample plus top-20 process and disk usage samples per interval."""
     while True:
@@ -450,11 +471,9 @@ async def _history_loop() -> None:
             except Exception:
                 logger.exception("disk history sampling failed")
             fired = await asyncio.to_thread(evaluate_alerts, sample)
-            toast_enabled = get_alert_channels().get("toast", True)
             for a in fired:
                 await manager.broadcast("metrics", {"type": "alert", **a})
-                if toast_enabled:
-                    await send_toast(a["title"], a["message"])
+                _dispatch_in_background(a)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -668,18 +687,65 @@ async def api_speedtest() -> dict[str, Any]:
 
 @app.get("/api/alerts/rules")
 async def api_alert_rules_get() -> dict[str, Any]:
-    """Effective alert rules + notification channels."""
-    return get_alert_rules()
+    """Effective alert rules + channels (LINE token redacted)."""
+    return public_alert_rules()
 
 
 @app.put("/api/alerts/rules")
 async def api_alert_rules_put(payload: dict[str, Any]) -> dict[str, Any]:
     """Replace rules+channels; validates and hot-reloads the evaluator."""
     try:
-        saved = set_alert_rules(payload)
+        set_alert_rules(payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return saved
+    return public_alert_rules()
+
+
+NOTIFY_HEADER = "x-requested-with"
+NOTIFY_HEADER_VALUE = "windy-dashboard"
+
+
+@app.post("/api/alerts/test")
+async def api_alert_test(payload: dict[str, Any] | None = None,
+                         _admin: None = Depends(require_admin)) -> dict[str, Any]:
+    """Dispatch a sample alert through every enabled channel."""
+    body = payload or {}
+    alert = {
+        "id": "test",
+        "title": str(body.get("title") or "Test alert")[:200],
+        "message": str(body.get("message")
+                       or "Test notification from Windy Smart Dashboard")[:1000],
+        "value": None,
+        "threshold": None,
+        "ts": time.time(),
+    }
+    channels = await dispatch_alert(alert)
+    return {"ok": True, "channels": channels}
+
+
+@app.post("/api/alerts/notify")
+async def api_alert_notify(request: Request, payload: dict[str, Any],
+                           _admin: None = Depends(require_admin)) -> dict[str, Any]:
+    """Accept an external alert (e.g. scripts/compare.py) and fan it out."""
+    if request.headers.get(NOTIFY_HEADER) != NOTIFY_HEADER_VALUE:
+        raise HTTPException(status_code=403, detail="missing_origin_header")
+    title = str(payload.get("title") or "External alert")[:200]
+    message = str(payload.get("message") or "")[:1000]
+    ts = time.time()
+    await manager.broadcast("metrics", {"type": "alert", "id": "external",
+                                        "title": title, "message": message, "ts": ts})
+    await dispatch_alert({
+        "id": "external",
+        "title": title,
+        "message": message,
+        "value": None,
+        "threshold": None,
+        "severity": payload.get("severity"),
+        "regressions": payload.get("regressions"),
+        "source": str(payload.get("source") or "external"),
+        "ts": ts,
+    })
+    return {"ok": True}
 
 
 @app.get("/api/security/suspicious")
