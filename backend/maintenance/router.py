@@ -20,7 +20,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 
-from . import actions, cleaner, export, startup
+from . import actions, cleaner, export, startup, updates
 from . import history as action_log
 from .guards import require_allowed_host, require_csrf
 from .scanner import scan
@@ -203,6 +203,35 @@ async def action(payload: Annotated[dict[str, Any] | None, Body()] = None) -> di
         return await actions.run_action(str(data.get("action") or ""))
     except actions.ActionError as exc:
         raise _write_error("action", exc) from exc
+
+
+@router.get("/windows-update", dependencies=[_ALLOWED_HOST])
+async def windows_update() -> dict[str, object]:
+    try:
+        result = await updates.status()
+    except Exception as exc:
+        raise _read_error("windows-update", exc) from exc
+    body: dict[str, object] = dict(result)
+    body.update(
+        {
+            "ok": True,
+            "module": MODULE_NAME,
+            "version": MODULE_VERSION,
+            "stage": MODULE_STAGE,
+            "servedAt": _now_iso(),
+        }
+    )
+    return body
+
+
+@router.post("/windows-update/scan", dependencies=_WRITE_GUARDS)
+async def windows_update_scan() -> dict[str, Any]:
+    try:
+        return await updates.scan()
+    except actions.ActionError as exc:
+        raise _write_error("windows-update-scan", exc) from exc
+    except Exception as exc:
+        raise _write_error("windows-update-scan", exc) from exc
 
 
 @router.get("/clean/summary", dependencies=[_ALLOWED_HOST])

@@ -9,6 +9,7 @@ import MaintenanceHistory from '@/components/maintenance/MaintenanceHistory.vue'
 import DiskHealthCard from '@/components/maintenance/DiskHealthCard.vue'
 import ReportsCard from '@/components/maintenance/ReportsCard.vue'
 import StartupCard from '@/components/maintenance/StartupCard.vue'
+import WindowsUpdateCard from '@/components/maintenance/WindowsUpdateCard.vue'
 
 const store = useMaintenanceStore()
 
@@ -303,6 +304,8 @@ onUnmounted(stopReconnectWatch)
       <ReportsCard />
 
       <StartupCard />
+
+      <WindowsUpdateCard />
 
       <div class="card">
         <h3>ส่งออกข้อมูล</h3>
