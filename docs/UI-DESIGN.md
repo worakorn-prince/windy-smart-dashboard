@@ -46,6 +46,8 @@
 | `--font-sans` | `'Inter', 'Segoe UI', system-ui, …` | เหมือนกัน | ข้อความทั่วไป |
 | `--font-mono` | `'JetBrains Mono', ui-monospace, …` | เหมือนกัน | ตัวเลข / label |
 | `--accent-soft` | `rgba(34, 211, 238, .06)` | `rgba(8, 145, 178, .07)` | พื้นหลัง hover |
+| `--on-accent` | `#04121a` | `#04121a` | ตัวอักษรบนพื้น `--accent` |
+| `--on-warn` | `#1a1203` | `#1a1203` | ตัวอักษรบนพื้น `--accent-4` |
 | `--accent-glow` | `rgba(34, 211, 238, .18)` | `rgba(8, 145, 178, .22)` | เงา glow ตอน hover |
 
 Typography: body ใช้ `--font-sans` 14px / line-height 1.45, ตัวเลขและ label ใช้ `--font-mono`
@@ -90,7 +92,7 @@ Glow: `box-shadow: 0 0 0 1px var(--accent-glow)` เมื่อ hover การ
 | `icon` | `string?` | `''` | glyph/emoji เล็กหน้าชื่อ metric |
 | `delta` | `string \| null` | `null` | ข้อความ delta (เช่น `'+8 จุดเดิมสูงสุด'`) |
 | `deltaTone` | `'good' \| 'bad' \| 'flat'` | `'flat'` | โทนสีของ delta |
-| `caption` | `string?` | `''` | ข้อความท้ายการ์ด (เช่น `'เชียร์ 1 นาทีที่แล้ว'`) |
+| `caption` | `string?` | `''` | ข้อความท้ายการ์ด (เช่น `'อัปเดตล่าสุด 1 นาทีที่แล้ว'`) |
 | `subtitle` | `string?` | `''` | บรรทัดรองใต้ตัวเลข (ชื่อ CPU/GPU, `'จากทั้งหมด 32 GB · ใช้ 75%'`) |
 | `spark` | `number[]?` | `[]` | ชุดข้อมูล sparkline — วาดเมื่อมี ≥ 2 จุด |
 
@@ -129,8 +131,8 @@ Glow: `box-shadow: 0 0 0 1px var(--accent-glow)` เมื่อ hover การ
 | `disk_write_bps` | Disk W MB/s | `#f87171` red |
 
 Range tabs: `5m` (`5 นาที`), `1h` (`1 ชม.`), `6h` (`6 ชม.`), `24h` (`24 ชม.`)
-Area fill ใช้ gradient จากสีของ series (alpha 0.18 → 0), grid/axis ใช้ `--grid-line` / `--muted`
-อ่านค่าสีจาก CSS variable ตอน render เพื่อให้ตาม theme ที่สลับอยู่
+Area fill ใช้ gradient จากสีของ series (alpha 0.18 → 0), grid/axis อ่านจาก `--grid-line` / `--muted`
+ผ่าน `getComputedStyle` ตอน `render()` เพื่อให้ตาม theme ที่สลับอยู่ (palette ของเส้นเป็นค่าคงที่ใน `SERIES_DEFS`)
 
 ## 6. กฎการใช้งาน
 

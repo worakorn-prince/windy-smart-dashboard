@@ -21,6 +21,14 @@ def test_history_valid_range(client, monkeypatch):
     assert r.json()["range"] == "1h"
 
 
+@pytest.mark.parametrize("rng", ["5m", "1h", "6h", "24h"])
+def test_history_accepts_every_supported_range(client, monkeypatch, rng):
+    monkeypatch.setattr(history, "query_range", lambda value="1h": {"range": value, "bucket_sec": 1, "count": 0, "points": []})
+    r = client.get("/api/history", params={"range": rng})
+    assert r.status_code == 200
+    assert r.json()["range"] == rng
+
+
 def test_history_invalid_range_422(client):
     r = client.get("/api/history", params={"range": "bogus"})
     assert r.status_code == 422

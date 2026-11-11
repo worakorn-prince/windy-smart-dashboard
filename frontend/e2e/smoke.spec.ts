@@ -59,6 +59,20 @@ test.describe('Shell and dashboard', () => {
     await expect(page.locator('button', { hasText: '5 นาที' })).toBeVisible()
   })
 
+  test('sidebar collapses to the icon rail on narrow screens', async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 900 })
+    await page.goto('/')
+
+    const sidebar = await page.getByTestId('sidebar').boundingBox()
+    expect(sidebar).not.toBeNull()
+    expect(sidebar!.width).toBeLessThan(100)
+    await expect(page.getByTestId('side-nav-dashboard')).toBeVisible()
+
+    const content = await page.locator('main.content').boundingBox()
+    expect(content).not.toBeNull()
+    expect(content!.x).toBeGreaterThanOrEqual(60)
+  })
+
   test('layout toolbar opens and closes the layout panel', async ({ page }) => {
     await page.goto('/')
 

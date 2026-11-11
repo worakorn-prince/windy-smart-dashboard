@@ -93,7 +93,7 @@ describe('StatRow', () => {
     store.cpuHistory = [18, 20]
     await nextTick()
 
-    expect(w.get('[data-testid="stat-tile-cpu"]').text()).toContain('เชียร์')
+    expect(w.get('[data-testid="stat-tile-cpu"]').text()).toContain('อัปเดตล่าสุด')
   })
 
   it('shows an em dash without units when the store is empty', async () => {

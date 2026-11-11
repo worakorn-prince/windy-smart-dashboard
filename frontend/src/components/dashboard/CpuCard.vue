@@ -153,6 +153,9 @@ function tempClass(v: number) {
 
 <style scoped>
 .cpu-card { grid-column: span 2; }
+@media (max-width: 720px) {
+  .cpu-card { grid-column: auto; }
+}
 .card-head {
   display: flex;
   align-items: center;

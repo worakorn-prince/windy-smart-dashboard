@@ -504,7 +504,6 @@ onMounted(() => {
 }
 @media (max-width: 720px) {
   .grid { grid-template-columns: 1fr; }
-  .cpu-card { grid-column: span 1; }
   .page-head h1 { font-size: 21px; }
   .head-right { justify-content: flex-start; }
 }

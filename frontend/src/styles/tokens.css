@@ -27,6 +27,8 @@
   --font-mono:     'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --accent-soft:   rgba(34, 211, 238, .06);
   --accent-glow:   rgba(34, 211, 238, .18);
+  --on-accent:     #04121a;
+  --on-warn:       #1a1203;
 }
 
 :root[data-theme='light'] {
@@ -58,4 +60,6 @@
   --font-mono:     'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --accent-soft:   rgba(8, 145, 178, .07);
   --accent-glow:   rgba(8, 145, 178, .22);
+  --on-accent:     #04121a;
+  --on-warn:       #1a1203;
 }

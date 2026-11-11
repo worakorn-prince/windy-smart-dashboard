@@ -627,7 +627,7 @@ async def api_sensors_status() -> dict[str, Any]:
 
 
 @app.get("/api/history")
-async def api_history(rng: Literal["1h", "6h", "24h"] = Query(default="1h", alias="range")) -> dict[str, Any]:
+async def api_history(rng: Literal["5m", "1h", "6h", "24h"] = Query(default="1h", alias="range")) -> dict[str, Any]:
     """Return bucketed metrics history, rejecting unknown ranges with 422."""
     return await asyncio.to_thread(history.query_range, rng)
 

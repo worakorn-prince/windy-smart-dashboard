@@ -70,7 +70,14 @@ store.connect()
     <div class="app-main">
       <header class="topbar">
         <slot name="actions" />
-        <button type="button" data-testid="theme-toggle" class="theme-toggle" @click="toggleTheme">
+        <button
+          type="button"
+          data-testid="theme-toggle"
+          class="theme-toggle"
+          :aria-label="theme === 'dark' ? 'สลับเป็นธีมสว่าง' : 'สลับเป็นธีมมืด'"
+          :aria-pressed="theme === 'light'"
+          @click="toggleTheme"
+        >
           {{ theme === 'dark' ? '☀️ สว่าง' : '🌙 มืด' }}
         </button>
       </header>
@@ -121,10 +128,10 @@ store.connect()
   place-items: center;
   border-radius: 9px;
   background: linear-gradient(135deg, var(--accent), var(--accent-3));
-  color: #04121a;
+  color: var(--on-accent);
   font-size: 16px;
   font-weight: 800;
-  box-shadow: 0 0 18px rgba(34, 211, 238, .35);
+  box-shadow: 0 0 18px var(--accent-glow);
 }
 
 .brand-text {
@@ -201,7 +208,7 @@ store.connect()
   padding: 1px 6px;
   border-radius: var(--radius-pill);
   background: var(--accent-4);
-  color: #1a1203;
+  color: var(--on-warn);
   font-size: 10px;
   font-weight: 700;
   text-align: center;

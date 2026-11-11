@@ -112,9 +112,9 @@ watch(
 const caption = computed(() => {
   if (firstSampleAt.value == null) return 'กำลังเก็บข้อมูล…'
   const minutes = Math.max(1, Math.floor((now.value - firstSampleAt.value) / 60_000))
-  if (minutes < 60) return `เชียร์ ${minutes} นาทีที่แล้ว`
+  if (minutes < 60) return `อัปเดตล่าสุด ${minutes} นาทีที่แล้ว`
   const hours = Math.floor(minutes / 60)
-  return `เชียร์ ${hours} ชั่วโมงที่แล้ว`
+  return `อัปเดตล่าสุด ${hours} ชั่วโมงที่แล้ว`
 })
 
 function peakDelta(

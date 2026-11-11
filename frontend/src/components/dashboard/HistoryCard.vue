@@ -69,6 +69,7 @@ const enabled = ref<SeriesKey[]>([...tabKeys('cpu')])
 const chartEl = ref<HTMLElement | null>(null)
 let uplot: uPlot | null = null
 let resizeObs: ResizeObserver | null = null
+let themeObserver: MutationObserver | null = null
 let refreshTimer: number | null = null
 let renderTimer: number | null = null
 let lastSig = ''
@@ -247,7 +248,8 @@ onMounted(async () => {
   await loadTab()
   await store.load()
   render()
-  new MutationObserver(() => refreshChart()).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+  themeObserver = new MutationObserver(() => refreshChart())
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
   resizeObs = new ResizeObserver(() => {
     if (uplot && chartEl.value) {
       uplot.setSize({ width: chartEl.value.clientWidth || 600, height: 340 })
@@ -268,6 +270,7 @@ watch(enabled, (v) => {
 onBeforeUnmount(() => {
   if (refreshTimer) window.clearInterval(refreshTimer)
   if (renderTimer) window.clearTimeout(renderTimer)
+  if (themeObserver) themeObserver.disconnect()
   if (resizeObs) resizeObs.disconnect()
   if (uplot) uplot.destroy()
 })
@@ -376,7 +379,7 @@ onBeforeUnmount(() => {
 .range-btn.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: var(--bg);
+  color: var(--on-accent);
   font-weight: 700;
 }
 .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 2px; }
