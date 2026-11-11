@@ -22,7 +22,7 @@ import psutil
 import config
 import metrics
 
-HistoryRange = Literal["1h", "6h", "24h"]
+HistoryRange = Literal["5m", "1h", "6h", "24h"]
 
 logger = logging.getLogger("dashboard.history")
 
@@ -47,7 +47,7 @@ _COLS = ("cpu_pct", "ram_pct", "swap_pct", "cpu_temp", "gpu_temp", "disk_temp_ma
          "net_sent_bps", "net_recv_bps",
          "disk_read_bps", "disk_write_bps")
 
-_RANGES: dict[str, int] = {"1h": 3600, "6h": 21600, "24h": 86400}
+_RANGES: dict[str, int] = {"5m": 300, "1h": 3600, "6h": 21600, "24h": 86400}
 
 _lock = threading.Lock()
 _prev_lock = threading.Lock()

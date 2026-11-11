@@ -43,6 +43,18 @@ def test_schema_created_and_bucketing_1h(tmp_db):
     assert p["net_recv_bps"] == 2000
 
 
+def test_5m_uses_one_second_buckets(tmp_db):
+    conn = history._get_conn()
+    _seed(conn, time.time() - 240, count=24)
+    r = history.query_range("5m")
+    assert r["range"] == "5m"
+    assert r["bucket_sec"] == 1
+    assert r["count"] == 24
+    p = r["points"][0]
+    assert 50 <= p["cpu_pct"] <= 59
+    assert p["cpu_temp"] == 60
+
+
 def test_6h_uses_60s_buckets(tmp_db):
     conn = history._get_conn()
     _seed(conn, time.time() - 7000, count=700)

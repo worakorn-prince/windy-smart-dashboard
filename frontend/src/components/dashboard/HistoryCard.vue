@@ -19,21 +19,27 @@ interface SeriesDef {
 const BYTES_PER_MB = 1024 * 1024
 
 const SERIES_DEFS: SeriesDef[] = [
-  { key: 'cpu_pct', label: 'CPU %', scale: '%', stroke: '#4fc3f7' },
-  { key: 'ram_pct', label: 'RAM %', scale: '%', stroke: '#aed581' },
-  { key: 'swap_pct', label: 'Swap %', scale: '%', stroke: '#80deea' },
-  { key: 'cpu_temp', label: 'CPU °C', scale: '°C', stroke: '#ff8a65' },
-  { key: 'gpu_temp', label: 'GPU °C', scale: '°C', stroke: '#ba68c8' },
-  { key: 'disk_temp_max', label: 'Disk °C', scale: '°C', stroke: '#ffb74d' },
-  { key: 'cpu_power_w', label: 'CPU W', scale: 'W', stroke: '#fff176' },
-  { key: 'gpu_power_w', label: 'GPU W', scale: 'W', stroke: '#ff8a65' },
-  { key: 'net_recv_bps', label: 'Net ↓ MB/s', scale: 'MB/s', stroke: '#64b5f6', div: BYTES_PER_MB },
-  { key: 'net_sent_bps', label: 'Net ↑ MB/s', scale: 'MB/s', stroke: '#9575cd', div: BYTES_PER_MB },
-  { key: 'disk_read_bps', label: 'Disk R MB/s', scale: 'MB/s', stroke: '#81c784', div: BYTES_PER_MB },
-  { key: 'disk_write_bps', label: 'Disk W MB/s', scale: 'MB/s', stroke: '#e57373', div: BYTES_PER_MB },
+  { key: 'cpu_pct', label: 'CPU %', scale: '%', stroke: '#22d3ee' },
+  { key: 'ram_pct', label: 'RAM %', scale: '%', stroke: '#a3e635' },
+  { key: 'swap_pct', label: 'Swap %', scale: '%', stroke: '#4ade80' },
+  { key: 'cpu_temp', label: 'CPU °C', scale: '°C', stroke: '#fbbf24' },
+  { key: 'gpu_temp', label: 'GPU °C', scale: '°C', stroke: '#a78bfa' },
+  { key: 'disk_temp_max', label: 'Disk °C', scale: '°C', stroke: '#f97316' },
+  { key: 'cpu_power_w', label: 'CPU W', scale: 'W', stroke: '#f472b6' },
+  { key: 'gpu_power_w', label: 'GPU W', scale: 'W', stroke: '#fb923c' },
+  { key: 'net_recv_bps', label: 'Net ↓ MB/s', scale: 'MB/s', stroke: '#38bdf8', div: BYTES_PER_MB },
+  { key: 'net_sent_bps', label: 'Net ↑ MB/s', scale: 'MB/s', stroke: '#818cf8', div: BYTES_PER_MB },
+  { key: 'disk_read_bps', label: 'Disk R MB/s', scale: 'MB/s', stroke: '#34d399', div: BYTES_PER_MB },
+  { key: 'disk_write_bps', label: 'Disk W MB/s', scale: 'MB/s', stroke: '#f87171', div: BYTES_PER_MB },
 ]
 
-const RANGES: HistoryRange[] = ['1h', '6h', '24h']
+const RANGES: HistoryRange[] = ['5m', '1h', '6h', '24h']
+const RANGE_LABELS: Record<HistoryRange, string> = {
+  '5m': '5 นาที',
+  '1h': '1 ชม.',
+  '6h': '6 ชม.',
+  '24h': '24 ชม.',
+}
 const STORAGE_KEY = 'history.enabled'
 const TAB_STORAGE_KEY = 'history.tab'
 
@@ -154,31 +160,53 @@ function buildData(): uPlot.AlignedData {
   return [x, ...ys]
 }
 
+function hexToRgba(hex: string, alpha: number): string {
+  const raw = hex.replace('#', '')
+  const full = raw.length === 3
+    ? raw.split('').map(c => c + c).join('')
+    : raw.padEnd(6, '0').slice(0, 6)
+  const r = parseInt(full.slice(0, 2), 16) || 0
+  const g = parseInt(full.slice(2, 4), 16) || 0
+  const b = parseInt(full.slice(4, 6), 16) || 0
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+function makeFill(color: string) {
+  return (u: uPlot): CanvasGradient => {
+    const grad = u.ctx.createLinearGradient(0, u.bbox.top, 0, u.bbox.top + u.bbox.height)
+    grad.addColorStop(0, hexToRgba(color, 0.18))
+    grad.addColorStop(1, hexToRgba(color, 0))
+    return grad
+  }
+}
+
+const legendDefs = computed(() => SERIES_DEFS.filter(d => enabled.value.includes(d.key)))
+
 function render() {
   if (!chartEl.value) return
   const defs = activeDefs()
   const scales = usedScales(defs)
   const css = getComputedStyle(document.documentElement)
-  const cBorder = css.getPropertyValue('--border').trim() || '#2d2f55'
-  const cMuted = css.getPropertyValue('--muted').trim() || '#a0a0c0'
-  const cText = css.getPropertyValue('--text').trim() || '#e6e6ea'
+  const cGrid = css.getPropertyValue('--grid-line').trim() || '#16203a'
+  const cMuted = css.getPropertyValue('--muted').trim() || '#64748b'
 
   const axisStyle = {
     stroke: cMuted,
-    grid: { stroke: cBorder, width: 0.5 },
-    ticks: { stroke: cBorder, width: 0.5 },
-    font: '12px ui-monospace, monospace',
+    grid: { stroke: cGrid, width: 1 },
+    ticks: { stroke: cGrid, width: 1 },
+    font: '11px ui-monospace, monospace',
   }
 
   const opts: uPlot.Options = {
     width: chartEl.value.clientWidth || 600,
-    height: 280,
+    height: 340,
     series: [
       {},
       ...defs.map(d => ({
         label: d.label,
         stroke: d.stroke,
-        width: 1.6,
+        width: 2,
+        fill: makeFill(d.stroke),
         scale: d.scale,
         spanGaps: false,
         value: (_u: uPlot, v: number | null) => fmtVal(d, v),
@@ -186,7 +214,7 @@ function render() {
     ],
     axes: [{ ...axisStyle }, ...scales.map(s => ({ scale: s, ...axisStyle }))],
     scales: Object.fromEntries(scales.map(s => [s, { auto: true }])),
-    legend: { show: true, live: false },
+    legend: { show: false },
     cursor: { points: { show: false } },
   }
 
@@ -222,7 +250,7 @@ onMounted(async () => {
   new MutationObserver(() => refreshChart()).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
   resizeObs = new ResizeObserver(() => {
     if (uplot && chartEl.value) {
-      uplot.setSize({ width: chartEl.value.clientWidth || 600, height: 280 })
+      uplot.setSize({ width: chartEl.value.clientWidth || 600, height: 340 })
     }
   })
   if (chartEl.value) resizeObs.observe(chartEl.value)
@@ -248,7 +276,13 @@ onBeforeUnmount(() => {
 <template>
   <div class="card history-card">
     <div class="head">
-      <h3>History <span v-if="refreshing" class="updating">Updating…</span></h3>
+      <div class="head-text">
+        <h3 class="card-title">
+          กราฟประวัติการใช้งาน
+          <span v-if="refreshing" class="updating">กำลังอัปเดต…</span>
+        </h3>
+        <p class="subtitle">แบบเรียลไทม์: CPU, GPU และ RAM</p>
+      </div>
       <div class="ranges">
         <button
           v-for="r in RANGES"
@@ -256,7 +290,7 @@ onBeforeUnmount(() => {
           class="range-btn"
           :class="{ active: store.range === r }"
           @click="setRange(r)"
-        >{{ r.toUpperCase() }}</button>
+        >{{ RANGE_LABELS[r] }}</button>
       </div>
     </div>
 
@@ -264,8 +298,8 @@ onBeforeUnmount(() => {
       <button data-testid="history-tab-cpu" class="tab-btn" :class="{ active: activeTab === 'cpu' }" @click="selectTab('cpu')">CPU</button>
       <button data-testid="history-tab-ram" class="tab-btn" :class="{ active: activeTab === 'ram' }" @click="selectTab('ram')">RAM</button>
       <button data-testid="history-tab-gpu" class="tab-btn" :class="{ active: activeTab === 'gpu' }" @click="selectTab('gpu')">GPU</button>
-      <button data-testid="history-tab-network" class="tab-btn" :class="{ active: activeTab === 'network' }" @click="selectTab('network')">Network</button>
-      <button data-testid="history-tab-disk" class="tab-btn" :class="{ active: activeTab === 'disk' }" @click="selectTab('disk')">Disk</button>
+      <button data-testid="history-tab-network" class="tab-btn" :class="{ active: activeTab === 'network' }" @click="selectTab('network')">เครือข่าย</button>
+      <button data-testid="history-tab-disk" class="tab-btn" :class="{ active: activeTab === 'disk' }" @click="selectTab('disk')">ดิสก์</button>
     </div>
 
     <div class="chips">
@@ -277,6 +311,13 @@ onBeforeUnmount(() => {
         :style="{ '--chip-color': d.stroke }"
         @click="toggle(d.key)"
       >{{ d.label }}</button>
+    </div>
+
+    <div class="legend">
+      <span v-for="d in legendDefs" :key="d.key" class="legend-item">
+        <span class="legend-dot" :style="{ background: d.stroke, color: d.stroke }"></span>
+        {{ d.label }}
+      </span>
     </div>
 
     <p v-if="store.loading && !store.points.length" class="hint">Loading history…</p>
@@ -294,14 +335,63 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .history-card { min-width: 0; }
-.head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-.ranges { display: flex; gap: 6px; }
-.range-btn {
-  background: transparent; color: var(--muted); border: 1px solid var(--border);
-  border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
 }
-.range-btn.active { color: var(--text); border-color: var(--accent); background: rgba(124,156,255,.12); }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 12px; }
+.head-text { min-width: 0; }
+.card-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.02em;
+  text-transform: none;
+  white-space: normal;
+}
+.subtitle { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+.ranges {
+  display: flex;
+  gap: 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px;
+}
+.range-btn {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.range-btn:hover { color: var(--text); border-color: var(--border-strong); }
+.range-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+  font-weight: 700;
+}
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 2px; }
+.tab-btn {
+  background: transparent; color: var(--text-dim); border: 1px solid var(--border);
+  border-radius: 999px; padding: 3px 12px; font-size: 12px; cursor: pointer;
+}
+.tab-btn:hover { color: var(--text); border-color: var(--border-strong); }
+.tab-btn.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  font-weight: 600;
+}
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 10px; }
 .chip {
   background: transparent; border: 1px solid var(--border); color: var(--muted);
   border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer;
@@ -310,14 +400,25 @@ onBeforeUnmount(() => {
   color: var(--chip-color); border-color: var(--chip-color);
   background: color-mix(in srgb, var(--chip-color) 14%, transparent);
 }
-.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 2px; }
-.tab-btn {
-  background: transparent; color: var(--muted); border: 1px solid var(--border);
-  border-radius: 8px; padding: 4px 12px; font-size: 12px; cursor: pointer;
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--text-dim);
 }
-.tab-btn.active { color: var(--text); border-color: var(--accent); background: rgba(124,156,255,.12); }
+.legend-item { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono, ui-monospace, monospace); }
+.legend-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: 0 0 8px currentColor;
+}
 .chart { min-width: 0; cursor: crosshair; }
 .hint { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
-.updating { color: var(--muted); font-size: 12px; font-weight: 400; }
+.updating { margin-left: 8px; color: var(--muted); font-size: 12px; font-weight: 400; }
 .bad-text { color: var(--bad); }
 </style>

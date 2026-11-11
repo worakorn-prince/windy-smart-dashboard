@@ -54,8 +54,11 @@ const vramFreeGb = (g: GpuInfo): string => (g.vram_free_mb == null ? '—' : `${
 </script>
 
 <template>
-  <div class="card">
-    <h3>GPU</h3>
+  <div class="card gpu-card">
+    <div class="card-head">
+      <span class="card-icon" aria-hidden="true">◈</span>
+      <h3>GPU</h3>
+    </div>
     <div v-if="gpu && gpu.gpus.length > 0">
       <div class="hero" data-testid="gpu-hero" :data-severity="gpuSev">
         <span class="hero-value" data-testid="gpu-hero-value" :style="{ color: gpuSevColor }">{{ maxUsage != null ? maxUsage.toFixed(1) + '%' : 'N/A' }}</span>
@@ -131,6 +134,25 @@ const vramFreeGb = (g: GpuInfo): string => (g.vram_free_mb == null ? '—' : `${
 </template>
 
 <style scoped>
+.gpu-card { min-width: 0; }
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.card-icon {
+  font-size: 16px;
+  line-height: 1;
+  color: var(--accent-3);
+}
+.card-head h3 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-dim);
+}
 .hero {
   display: flex;
   align-items: baseline;
@@ -138,7 +160,7 @@ const vramFreeGb = (g: GpuInfo): string => (g.vram_free_mb == null ? '—' : `${
   margin: 2px 0 12px;
 }
 .hero-value {
-  font-size: 44px;
+  font-size: 38px;
   font-weight: 800;
   line-height: 1;
   font-variant-numeric: tabular-nums;

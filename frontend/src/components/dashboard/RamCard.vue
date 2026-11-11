@@ -39,8 +39,11 @@ function tempClass(v: number) {
 </script>
 
 <template>
-  <div class="card">
-    <h3>Memory</h3>
+  <div class="card ram-card">
+    <div class="card-head">
+      <span class="card-icon" aria-hidden="true">▦</span>
+      <h3>RAM</h3>
+    </div>
     <div v-if="ram">
       <div class="hero" data-testid="ram-hero" :data-severity="ramSev">
         <span class="hero-value" data-testid="ram-hero-value" :style="{ color: ramSevColor }">{{ ram.percent.toFixed(1) }}%</span>
@@ -164,6 +167,25 @@ function tempClass(v: number) {
 </template>
 
 <style scoped>
+.ram-card { min-width: 0; }
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.card-icon {
+  font-size: 16px;
+  line-height: 1;
+  color: var(--accent-2);
+}
+.card-head h3 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-dim);
+}
 .hero {
   display: flex;
   align-items: baseline;
@@ -171,7 +193,7 @@ function tempClass(v: number) {
   margin: 2px 0 12px;
 }
 .hero-value {
-  font-size: 44px;
+  font-size: 38px;
   font-weight: 800;
   line-height: 1;
   font-variant-numeric: tabular-nums;

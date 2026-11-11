@@ -17,7 +17,7 @@ export interface HistoryPoint {
   disk_write_bps: number | null
 }
 
-export type HistoryRange = '1h' | '6h' | '24h'
+export type HistoryRange = '5m' | '1h' | '6h' | '24h'
 
 interface HistoryResponse {
   range: string

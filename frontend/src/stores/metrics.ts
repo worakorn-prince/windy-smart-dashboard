@@ -284,9 +284,9 @@ export function severityOf(kind: SeverityKind, value: number | null | undefined)
 }
 
 export const SEVERITY_COLORS: Record<SeverityLevel, string> = {
-  ok: '#5fd97c',
-  warn: '#ffd75f',
-  crit: '#ff6b6b',
+  ok: '#4ade80',
+  warn: '#fbbf24',
+  crit: '#f87171',
 }
 
 const ADMIN_TOKEN_KEY = 'dashboard:adminToken'
