@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-11-12
+
+### Added
+
+- **Drag & drop card reordering** on the dashboard: every card has a grip
+  (top-right, revealed on hover) — drag it onto another card in the same zone
+  to swap their positions. The result persists in the existing layout store
+  (`dash:layout:v1`); cross-zone drops are no-ops, `Escape` cancels a drag, and
+  the up/down/hide layout controls remain as the keyboard fallback.
+
+### Fixed
+
+- The RAM KPI tile rendered raw byte counts with a GB unit (e.g.
+  `11520782336 GB`); it now converts to GB and matches the Memory card.
+
+### Changed
+
+- `APP_VERSION`, the maintenance `MODULE_VERSION`, `frontend/package.json` and
+  `frontend/package-lock.json` bumped to `0.6.1`.
+
 ## [0.6.0] - 2026-11-12
 
 ### Changed

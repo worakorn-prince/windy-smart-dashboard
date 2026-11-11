@@ -25,6 +25,11 @@ Built with FastAPI (Python 3.12) + Vue 3 / TypeScript / Vite.
 > packaging (`scripts/package_portable.py`), an OpenAPI docs + `/api/version`
 > endpoint, and a Playwright E2E smoke suite.
 
+> ✨ **What's new in v0.6.1** — drag & drop card reordering on the dashboard
+> (drag a card's grip onto another card in the same zone to swap them; the
+> arrangement persists) and a fix for the RAM KPI tile that displayed raw
+> bytes instead of GB.
+
 > ✨ **What's new in v0.6.0** — full "pulse" UI redesign: dark navy design
 > token system, fixed left sidebar shell with grouped nav and live device
 > card, KPI tile row (CPU/GPU/RAM/POWER) with SVG sparklines, restyled history
