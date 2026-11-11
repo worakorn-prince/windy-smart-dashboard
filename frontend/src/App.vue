@@ -45,7 +45,6 @@ store.connect()
           <RouterLink to="/" exact-active-class="is-active" data-testid="side-nav-dashboard">Dashboard</RouterLink>
           <RouterLink to="/security" exact-active-class="is-active" data-testid="side-nav-security">Security</RouterLink>
           <RouterLink to="/maintenance" exact-active-class="is-active" data-testid="side-nav-maintenance">Maintenance</RouterLink>
-          <RouterLink to="/viewer" exact-active-class="is-active" data-testid="side-nav-viewer">Viewer</RouterLink>
         </nav>
       </header>
 

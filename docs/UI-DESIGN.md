@@ -68,7 +68,7 @@ Glow: `box-shadow: 0 0 0 1px var(--accent-glow)` เมื่อ hover การ
 
 - `aside.sidebar` (`data-testid="sidebar"`) — fixed ซ้าย, กว้าง `var(--sidebar-w)` = 200px, พื้น `--bg-elev`
   - brand block: `<RouterLink class="brand" aria-label="Windy Smart Dashboard">` + `brand-mark` gradient cyan→violet
-  - nav group `MONITOR` (`data-testid="side-nav"`): Dashboard / Security / Maintenance / Viewer
+  - nav group `MONITOR` (`data-testid="side-nav"`): Dashboard / Security / Maintenance
   - nav group `SYSTEM` (`data-testid="side-nav-system"`): การแจ้งเตือน + badge จำนวน (`data-testid="side-nav-alert-count"`)
   - device card (`data-testid="device-card"`) ปักล่างด้วย `margin-top: auto`: hostname, OS, Python + จุดเขียว pulse
 - `div.app-main` — `topbar` (sticky, `margin-left: var(--sidebar-w)`) + `main.content` (padding 20px, margin-left เท่ากัน)

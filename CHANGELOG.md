@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`frontend/src/styles/tokens.css`), shared base styles (`base.css`), fixed left
   sidebar shell with grouped nav and device card, KPI tile row with SVG
   sparklines, restyled history chart with 5m/1h/6h/24h range tabs and gradient
-  area fills, and page headers across Security / Maintenance / Viewer.
+  area fills, and page headers across Security / Maintenance.
   All existing `data-testid` hooks and the light theme are preserved.
 - Theme colour of the PWA manifest and `index.html` updated to `#070b14`.
 
@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `GET /api/history?range=5m` — new 5-minute history range (300 s).
 - `docs/UI-DESIGN.md` — design tokens, component inventory and verification guide.
+
+### Removed
+
+- The `/viewer` page, its sidebar entry and route are removed from the frontend:
+  the Agent Scope Board belongs to the separate scopeboard project. The backend
+  `viewer_api` routes are untouched.
 
 ## [0.5.1] - 2026-11-11
 
