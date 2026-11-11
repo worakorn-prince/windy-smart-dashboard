@@ -25,6 +25,14 @@ Built with FastAPI (Python 3.12) + Vue 3 / TypeScript / Vite.
 > packaging (`scripts/package_portable.py`), an OpenAPI docs + `/api/version`
 > endpoint, and a Playwright E2E smoke suite.
 
+> ✨ **What's new in v0.6.0** — full "pulse" UI redesign: dark navy design
+> token system, fixed left sidebar shell with grouped nav and live device
+> card, KPI tile row (CPU/GPU/RAM/POWER) with SVG sparklines, restyled history
+> chart with 5m/1h/6h/24h range tabs and gradient area fills, page headers
+> across Security / Maintenance, widened RAM and storage cards, and the PWA
+> theme colour moved to `#070b14`. The scopeboard `/viewer` page was removed
+> from the dashboard (backend `/api/viewer` routes remain).
+
 > ✨ **What's new in v0.5.1** — `run.ps1` now opens the dashboard in your
 > default browser automatically once the server is ready (a `-NoBrowser` switch
 > disables it; dev mode waits for the backend then opens the Vite URL).
@@ -273,7 +281,7 @@ A background sampler writes one row of cheap scalar metrics to
 `HISTORY_SAMPLE_INTERVAL` seconds. The **History** card on the dashboard
 queries bucketed averages (~360 points max) for the selected range.
 
-- Ranges: `1h` (10 s buckets), `6h` (60 s), `24h` (240 s)
+- Ranges: `5m` (1 s buckets), `1h` (10 s buckets), `6h` (60 s), `24h` (240 s)
 - Series: CPU/RAM/swap %, CPU/GPU/disk-max temperatures,
   CPU W / GPU W power draw, network & disk throughput (MB/s)
 - Rows older than `HISTORY_RETENTION_HOURS` are deleted automatically
@@ -281,7 +289,8 @@ queries bucketed averages (~360 points max) for the selected range.
 - Temperatures/power are `NULL` when not running elevated — the chart
   shows gaps and a hint instead
 - By default 6 of 11 series are shown (CPU/RAM %, CPU/GPU °C, CPU/GPU W);
-  use the range buttons (`1H` / `6H` / `24H`) to switch windows and the
+  use the range buttons (`5 นาที` / `1 ชม.` / `6 ชม.` / `24 ชม.`) to switch
+  windows and the
   series chips to toggle lines (choice persists in `localStorage`)
 
 ---
@@ -355,7 +364,7 @@ Open **http://localhost:5173** — Vite proxies `/api` and `/ws` to
 | GET    | `/` (and any non-API path)    | SPA frontend (served from `frontend/dist`) |
 | GET    | `/api/system`                 | Initial system snapshot                   |
 | GET    | `/api/sensors/status`         | LibreHardwareMonitor init status (availability / elevation) |
-| GET    | `/api/history?range=1h|6h|24h`| Bucketed metrics history (~360 points)    |
+| GET    | `/api/history?range=5m\|1h\|6h\|24h`| Bucketed metrics history (~360 points)    |
 | GET    | `/api/processes/{pid}`        | Process detail + 3-level tree + listening ports |
 | GET    | `/api/processes/{pid}/history?limit=60` | Per-process CPU/RAM samples (1–240) |
 | GET    | `/api/health/disk`            | Per-volume usage, SMART health, days-to-full forecast |

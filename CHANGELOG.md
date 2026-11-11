@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] - 2026-11-12
 
 ### Changed
 
@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sparklines, restyled history chart with 5m/1h/6h/24h range tabs and gradient
   area fills, and page headers across Security / Maintenance.
   All existing `data-testid` hooks and the light theme are preserved.
+- RAM and storage cards widened for readability: the primary zone now uses a
+  two-column grid (CPU full width, RAM and GPU half each) and the storage card
+  spans two columns in the secondary zone.
+- `APP_VERSION`, the maintenance `MODULE_VERSION`, `frontend/package.json` and
+  `frontend/package-lock.json` bumped to `0.6.0`.
 - Theme colour of the PWA manifest and `index.html` updated to `#070b14`.
 
 ### Added

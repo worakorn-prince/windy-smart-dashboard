@@ -37,7 +37,7 @@ Local-only HTTP/WebSocket API ของแดชบอร์ด (FastAPI) เอ
 | GET | `/api/version` | - | ชื่อแอป, `version`, `python`, `platform`, `port` (สำหรับ health check ภายนอก) |
 | GET | `/api/system` | - | snapshot ระบบ: system / cpu / ram / gpu |
 | GET | `/api/sensors/status` | - | สถานะ LibreHardwareMonitor (sanitized: available / elevated / state / reason / message) |
-| GET | `/api/history?range=1h\|6h\|24h` | - | ประวัติ metrics แบบ bucketed (~360 จุด); range อื่นได้ 422 |
+| GET | `/api/history?range=5m\|1h\|6h\|24h` | - | ประวัติ metrics แบบ bucketed (~360 จุด); range อื่นได้ 422 |
 | GET | `/api/processes/{pid}` | - | รายละเอียดโปรเซส + tree 3 ระดับ + listening ports |
 | GET | `/api/processes/{pid}/history?limit=60` | - | sample CPU/RAM ของโปรเซส (`limit` 1–240), เก่า→ใหม่ |
 | GET | `/api/health/disk` | - | usage ต่อ volume, SMART health, พยากรณ์วันดิสก์เต็ม |

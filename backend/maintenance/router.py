@@ -32,7 +32,7 @@ except ImportError:  # sys.path-style import (`maintenance.router`)
     from security import persistence as security_persistence
 
 MODULE_NAME = "maintenance"
-MODULE_VERSION = "0.5.1"
+MODULE_VERSION = "0.6.0"
 MODULE_STAGE = "write"
 
 logger = logging.getLogger(__name__)
