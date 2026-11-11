@@ -64,9 +64,11 @@ const gpuUsage = computed<number | null>(() => {
   return values.reduce((sum, v) => sum + v, 0) / values.length
 })
 
-const ramUsed = computed<number | null>(() => {
+const GB = 1024 ** 3
+
+const ramUsedGb = computed<number | null>(() => {
   const v = store.ram?.used
-  return typeof v === 'number' && Number.isFinite(v) ? v : null
+  return typeof v === 'number' && Number.isFinite(v) ? v / GB : null
 })
 
 const ramPercent = computed<number | null>(() => {
@@ -74,9 +76,9 @@ const ramPercent = computed<number | null>(() => {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 })
 
-const ramTotal = computed<number | null>(() => {
+const ramTotalGb = computed<number | null>(() => {
   const v = store.ram?.total
-  return typeof v === 'number' && Number.isFinite(v) ? v : null
+  return typeof v === 'number' && Number.isFinite(v) ? v / GB : null
 })
 
 const totalPower = computed<number | null>(() => {
@@ -197,19 +199,19 @@ const tiles = computed<TileSpec[]>(() => {
 
   const ramTile: TileSpec = {
     label: 'RAM',
-    value: ramUsed.value == null ? '—' : ramUsed.value.toFixed(1),
+    value: ramUsedGb.value == null ? '—' : ramUsedGb.value.toFixed(1),
     accent: 'lime',
     icon: '▦',
     delta: ramDelta.value?.text ?? null,
     deltaTone: ramDelta.value?.tone ?? 'flat',
     caption: cap,
     subtitle:
-      ramTotal.value != null && ramPercent.value != null
-        ? `จากทั้งหมด ${ramTotal.value.toFixed(0)} GB · ใช้ ${Math.round(ramPercent.value)}%`
+      ramTotalGb.value != null && ramPercent.value != null
+        ? `จากทั้งหมด ${ramTotalGb.value.toFixed(1)} GB · ใช้ ${Math.round(ramPercent.value)}%`
         : '',
-    spark: ramUsed.value == null ? [] : store.ramHistory,
+    spark: ramUsedGb.value == null ? [] : store.ramHistory,
   }
-  if (ramUsed.value != null) ramTile.unit = 'GB'
+  if (ramUsedGb.value != null) ramTile.unit = 'GB'
 
   const powerTile: TileSpec = {
     label: 'POWER',

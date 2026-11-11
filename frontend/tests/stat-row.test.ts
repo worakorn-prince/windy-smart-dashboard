@@ -8,6 +8,8 @@ import { useMetricsStore } from '@/stores/metrics'
 
 let wrapper: VueWrapper | null = null
 
+const GB = 1024 ** 3
+
 function mountStatRow() {
   const pinia = createPinia()
   setActivePinia(pinia)
@@ -39,7 +41,7 @@ describe('StatRow', () => {
     const { wrapper: w, store } = mountStatRow()
 
     store.cpu = { overall: 68.4, power_watts: 89 } as never
-    store.ram = { used: 24.03, total: 32, percent: 75 } as never
+    store.ram = { used: 24.03 * GB, total: 32 * GB, percent: 75 } as never
     store.gpu = { gpus: [{ gpu_usage_percent: 42, power_draw_watts: 120 }] } as never
     store.cpuHistory = [48, 56, 62, 68.4]
     store.ramHistory = [68, 72, 75]
@@ -54,7 +56,7 @@ describe('StatRow', () => {
     const { wrapper: w, store } = mountStatRow()
 
     store.cpu = { overall: 68.4, power_watts: 89 } as never
-    store.ram = { used: 24.03, total: 32, percent: 75 } as never
+    store.ram = { used: 24.03 * GB, total: 32 * GB, percent: 75 } as never
     store.gpu = { gpus: [{ gpu_usage_percent: 42, power_draw_watts: 120 }] } as never
     store.cpuHistory = [48, 56, 62, 68.4]
     store.ramHistory = [68, 72, 75]
@@ -68,6 +70,8 @@ describe('StatRow', () => {
 
     expect(tileValue(w, 'ram')).toBe('24.0')
     expect(tileUnit(w, 'ram')).toBe('GB')
+    // bytes from the store must be rendered as GB, not raw bytes
+    expect(w.get('[data-testid="stat-tile-ram"]').text()).toContain('จากทั้งหมด 32.0 GB')
 
     expect(tileValue(w, 'power')).toBe('209')
     expect(tileUnit(w, 'power')).toBe('W')
