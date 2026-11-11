@@ -14,6 +14,8 @@ import BlockedRulesCard from '@/components/security/BlockedRulesCard.vue'
 
 const store = useSecurityStore()
 
+const adminPill = 'Live'
+
 onMounted(() => {
   store.connect()
 })
@@ -21,7 +23,18 @@ onMounted(() => {
 
 <template>
   <div class="security-page">
-    <div class="banner muted small">
+    <header class="page-head">
+      <div class="head-left">
+        <p class="breadcrumb">SYSTEM / SECURITY</p>
+        <h1>ความปลอดภัยของระบบ</h1>
+        <p class="subtitle">พอร์ต, การเชื่อมต่อ, Defender และเหตุการณ์ที่บันทึกไว้</p>
+      </div>
+      <div class="head-right">
+        <span class="status-pill">● {{ adminPill }}</span>
+      </div>
+    </header>
+
+    <div class="callout small">
       <span>ℹ️ Some features (failed logins, kill process, block IP) require running as Administrator.</span>
     </div>
 
@@ -61,6 +74,59 @@ onMounted(() => {
 
 <style scoped>
 .security-page { display: flex; flex-direction: column; gap: 16px; }
-.banner { padding: 8px 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+
+.page-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.head-left { min-width: 0; }
+.breadcrumb {
+  margin: 0 0 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.page-head h1 {
+  margin: 0 0 4px;
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text);
+}
+.subtitle { margin: 0; font-size: 13px; color: var(--muted); }
+.head-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.callout {
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-4);
+  border-radius: var(--radius-ctl);
+  color: var(--text-dim);
+}
+
 .full-row > :deep(.card) { width: 100%; }
+
+@media (max-width: 900px) {
+  .page-head { flex-direction: column; align-items: stretch; }
+  .head-right { justify-content: flex-start; }
+}
 </style>

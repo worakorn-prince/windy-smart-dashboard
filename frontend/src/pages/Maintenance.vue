@@ -233,11 +233,15 @@ onUnmounted(stopReconnectWatch)
       <span>{{ relaunchStatusText }}</span>
     </div>
 
-    <div class="page-head">
-      <h2>
-        Maintenance
-        <span v-if="store.hasIssues" class="badge high">{{ store.counts.issues }} issues</span>
-      </h2>
+    <header class="page-head">
+      <div class="head-left">
+        <p class="breadcrumb">SYSTEM / MAINTENANCE</p>
+        <h1>
+          บำรุงรักษาระบบ
+          <span v-if="store.hasIssues" class="badge high">{{ store.counts.issues }} issues</span>
+        </h1>
+        <p class="subtitle">ตรวจสุขภาพระบบ, อัปเดต และสั่งงานบริการ</p>
+      </div>
       <div class="head-actions">
         <button
           :disabled="!!store.busy || relaunchState === 'scheduled'"
@@ -246,7 +250,7 @@ onUnmounted(stopReconnectWatch)
           {{ store.busy === 'relaunch' ? 'กำลังสั่งงาน…' : 'รีสตาร์ทบริการ (relaunch)' }}
         </button>
       </div>
-    </div>
+    </header>
 
     <div class="grid">
       <div class="card">
@@ -378,13 +382,49 @@ onUnmounted(stopReconnectWatch)
 
 .page-head {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  align-items: flex-start;
+  gap: 20px;
   flex-wrap: wrap;
 }
-.page-head h2 { margin: 0; font-size: 18px; display: flex; align-items: center; gap: 10px; }
+.head-left { min-width: 0; }
+.breadcrumb {
+  margin: 0 0 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.page-head h1 {
+  margin: 0 0 4px;
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.subtitle { margin: 0; font-size: 13px; color: var(--muted); }
 .head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 900px) {
+  .page-head { flex-direction: column; align-items: stretch; }
+  .head-actions { justify-content: flex-start; }
+}
 
 .full-row > :deep(.card) { width: 100%; }
 

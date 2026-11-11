@@ -168,8 +168,12 @@ onMounted(() => {
 
 <template>
   <div class="viewer-page" data-testid="viewer-page">
-    <div class="page-head">
-      <h2>Viewer <span class="badge info">Scopeboard</span></h2>
+    <header class="page-head">
+      <div class="head-left">
+        <p class="breadcrumb">PROJECTS / VIEWER</p>
+        <h1>Viewer <span class="badge info">Scopeboard</span></h1>
+        <p class="subtitle">ภาพรวมฟีเจอร์และความคืบหน้าของแต่ละโปรเจกต์</p>
+      </div>
       <div class="head-actions">
         <div class="dataset-toggle" data-testid="viewer-dataset-toggle">
           <button
@@ -194,7 +198,7 @@ onMounted(() => {
           Rebuild
         </button>
       </div>
-    </div>
+    </header>
 
     <div v-if="error" class="banner error" role="alert">
       <span>{{ error }}</span>
@@ -311,13 +315,40 @@ onMounted(() => {
 
 .page-head {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  align-items: flex-start;
+  gap: 20px;
   flex-wrap: wrap;
 }
-.page-head h2 { margin: 0; font-size: 18px; display: flex; align-items: center; gap: 10px; }
+.head-left { min-width: 0; }
+.breadcrumb {
+  margin: 0 0 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.page-head h1 {
+  margin: 0 0 4px;
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text);
+}
+.subtitle { margin: 0; font-size: 13px; color: var(--muted); }
 .head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
 
 .dataset-toggle { display: flex; gap: 4px; }
 
@@ -336,7 +367,7 @@ onMounted(() => {
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
 
-.kpi-card { text-align: center; }
+.kpi-card { text-align: center; border-left: 2px solid var(--accent); }
 .kpi-card .row { justify-content: center; }
 .kpi-card .value { font-size: 1.5em; font-weight: 700; }
 .kpi-card .value.good { color: var(--good); }
@@ -360,9 +391,12 @@ onMounted(() => {
 .timeline-event { font-weight: 600; color: var(--accent); }
 .timeline-task { color: var(--info); font-size: 11px; background: var(--panel); padding: 1px 6px; border-radius: 3px; }
 
-@media (max-width: 640px) {
+@media (max-width: 900px) {
   .page-head { flex-direction: column; align-items: stretch; }
   .head-actions { justify-content: flex-start; }
+}
+
+@media (max-width: 640px) {
   .dataset-toggle { width: 100%; }
   .dataset-toggle button { flex: 1; }
 }
