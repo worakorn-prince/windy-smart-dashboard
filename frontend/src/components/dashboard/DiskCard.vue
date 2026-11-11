@@ -36,7 +36,7 @@ function badgeTextColor(h: string) {
 </script>
 
 <template>
-  <div class="card">
+  <div class="card disk-card">
     <h3>Storage <button data-testid="card-toggle" @click="collapsed = !collapsed">{{ collapsed ? '+' : '−' }}</button></h3>
     <div v-show="!collapsed">
     <div v-if="disk">
@@ -169,6 +169,10 @@ function badgeTextColor(h: string) {
 </template>
 
 <style scoped>
+.disk-card { grid-column: span 2; }
+@media (max-width: 720px) {
+  .disk-card { grid-column: auto; }
+}
 .section { margin-bottom: 16px; }
 .section h4 { margin: 0 0 8px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
 .info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-top: 8px; }

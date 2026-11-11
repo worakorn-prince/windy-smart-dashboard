@@ -456,6 +456,8 @@ onMounted(() => {
 }
 
 .grid.wide { grid-template-columns: 1fr; }
+/* RAM/GPU ได้ครึ่งความกว้างเต็มจอ (CPU span 2 อยู่เต็มแถวบน) — ขยายพื้นที่อ่านรายละเอียด */
+.primary-zone { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .layout-toolbar { position: relative; display: flex; gap: 8px; align-items: center; }
 .layout-btn {
   background: var(--panel);
