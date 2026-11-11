@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { mount } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
@@ -265,5 +265,202 @@ describe('Dashboard layout toolbar', () => {
 
     expect(cardIds(wrapper.get('[data-testid="secondary-zone"]'))).toEqual(['speedtest'])
     expect(storedLayout()?.hidden).not.toContain('speedtest')
+  })
+})
+
+describe('Dashboard card drag & drop', () => {
+  // jsdom's Event constructor ignores unknown init properties (no layout, no PointerEvent),
+  // so build plain events and attach the pointer fields the composable reads.
+  function makePointerEvent(type: string, coords: { clientX: number; clientY: number }): Event {
+    const event = new window.Event(type, { bubbles: true, cancelable: true })
+    Object.assign(event, {
+      clientX: coords.clientX,
+      clientY: coords.clientY,
+      button: 0,
+      pointerId: 1,
+      pointerType: 'mouse',
+    })
+    return event
+  }
+
+  function mockElementFromPoint(element: Element | null): void {
+    Object.defineProperty(document, 'elementFromPoint', {
+      value: vi.fn(() => element),
+      configurable: true,
+      writable: true,
+    })
+  }
+
+  function mockPointerCapture(): void {
+    const proto = Element.prototype as unknown as { setPointerCapture: unknown; releasePointerCapture: unknown }
+    proto.setPointerCapture = vi.fn()
+    proto.releasePointerCapture = vi.fn()
+  }
+
+  // The mocks above patch globals — restore them so later describes/files see pristine DOM.
+  const proto = Element.prototype as unknown as { setPointerCapture?: unknown; releasePointerCapture?: unknown }
+  let originalCapture: unknown
+  let originalRelease: unknown
+  let originalElementFromPoint: unknown
+
+  beforeEach(() => {
+    originalCapture = proto.setPointerCapture
+    originalRelease = proto.releasePointerCapture
+    originalElementFromPoint = document.elementFromPoint
+  })
+
+  afterEach(() => {
+    proto.setPointerCapture = originalCapture
+    proto.releasePointerCapture = originalRelease
+    if (typeof originalElementFromPoint === 'function') {
+      document.elementFromPoint = originalElementFromPoint
+    } else {
+      delete (document as unknown as { elementFromPoint?: unknown }).elementFromPoint
+    }
+  })
+
+  it('wraps every rendered card in a .card-slot with a drag grip and span-2 wrapper class', () => {
+    const { wrapper } = mountDashboard()
+
+    const slots = wrapper.findAll('.card-slot')
+    expect(slots).toHaveLength(CARD_DEFS.length)
+    for (const slot of slots) {
+      expect(slot.attributes('data-card-id')).toBeTruthy()
+      expect(slot.find('.drag-grip').exists()).toBe(true)
+    }
+
+    expect(wrapper.get('[data-card-id="cpu"]').classes()).toContain('slot-span-2')
+    expect(wrapper.get('[data-card-id="disk"]').classes()).toContain('slot-span-2')
+    expect(wrapper.get('[data-card-id="ram"]').classes()).not.toContain('slot-span-2')
+    expect(wrapper.get('[data-card-id="power"]').classes()).not.toContain('slot-span-2')
+  })
+
+  it('swaps two same-zone cards when the grip is dragged onto the other card', async () => {
+    const { wrapper } = mountDashboard()
+
+    const powerSlot = wrapper.get('[data-card-id="power"]')
+    const diskSlot = wrapper.get('[data-card-id="disk"]')
+    const powerGrip = powerSlot.get('.drag-grip')
+
+    expect(storedLayout()).toBeNull()
+
+    mockPointerCapture()
+    mockElementFromPoint(diskSlot.get('.drag-grip').element)
+
+    powerGrip.element.dispatchEvent(makePointerEvent('pointerdown', { clientX: 10, clientY: 10 }))
+    powerGrip.element.dispatchEvent(makePointerEvent('pointermove', { clientX: 20, clientY: 10 }))
+    await nextTick()
+
+    expect(powerSlot.classes()).toContain('is-dragging')
+    expect(diskSlot.classes()).toContain('is-drop-target')
+
+    powerGrip.element.dispatchEvent(makePointerEvent('pointerup', { clientX: 20, clientY: 10 }))
+    await nextTick()
+
+    const saved = storedLayout()
+    expect(saved).not.toBeNull()
+    expect(saved!.order.indexOf('disk')).toBeLessThan(saved!.order.indexOf('power'))
+    expect(cardIds(wrapper.get('[data-testid="secondary-zone"]'))).toEqual([
+      'disk',
+      'battery',
+      'power',
+      'network',
+      'system',
+      'speedtest',
+    ])
+    expect(powerSlot.classes()).not.toContain('is-dragging')
+    expect(diskSlot.classes()).not.toContain('is-drop-target')
+  })
+
+  it('ignores drags below the 6px threshold', async () => {
+    const { wrapper } = mountDashboard()
+
+    const powerGrip = wrapper.get('[data-card-id="power"] .drag-grip')
+    const diskSlot = wrapper.get('[data-card-id="disk"]')
+
+    mockPointerCapture()
+    mockElementFromPoint(diskSlot.element)
+
+    powerGrip.element.dispatchEvent(makePointerEvent('pointerdown', { clientX: 10, clientY: 10 }))
+    powerGrip.element.dispatchEvent(makePointerEvent('pointermove', { clientX: 14, clientY: 12 }))
+    await nextTick()
+
+    expect(diskSlot.classes()).not.toContain('is-drop-target')
+
+    powerGrip.element.dispatchEvent(makePointerEvent('pointerup', { clientX: 14, clientY: 12 }))
+    await nextTick()
+
+    expect(storedLayout()).toBeNull()
+    expect(cardIds(wrapper.get('[data-testid="secondary-zone"]'))).toEqual([
+      'power',
+      'battery',
+      'disk',
+      'network',
+      'system',
+      'speedtest',
+    ])
+  })
+
+  it('refuses to drop onto a card from a different zone', async () => {
+    const { wrapper } = mountDashboard()
+
+    const powerGrip = wrapper.get('[data-card-id="power"] .drag-grip')
+    const cpuSlot = wrapper.get('[data-card-id="cpu"]')
+
+    mockPointerCapture()
+    mockElementFromPoint(cpuSlot.element)
+
+    powerGrip.element.dispatchEvent(makePointerEvent('pointerdown', { clientX: 10, clientY: 10 }))
+    powerGrip.element.dispatchEvent(makePointerEvent('pointermove', { clientX: 40, clientY: 40 }))
+    await nextTick()
+
+    expect(cpuSlot.classes()).not.toContain('is-drop-target')
+
+    powerGrip.element.dispatchEvent(makePointerEvent('pointerup', { clientX: 40, clientY: 40 }))
+    await nextTick()
+
+    expect(storedLayout()).toBeNull()
+    expect(cardIds(wrapper.get('[data-testid="secondary-zone"]'))).toEqual([
+      'power',
+      'battery',
+      'disk',
+      'network',
+      'system',
+      'speedtest',
+    ])
+  })
+
+  it('cancels the drag with Escape and persists nothing', async () => {
+    const { wrapper } = mountDashboard()
+
+    const powerGrip = wrapper.get('[data-card-id="power"] .drag-grip')
+    const diskSlot = wrapper.get('[data-card-id="disk"]')
+
+    mockPointerCapture()
+    mockElementFromPoint(diskSlot.element)
+
+    powerGrip.element.dispatchEvent(makePointerEvent('pointerdown', { clientX: 10, clientY: 10 }))
+    powerGrip.element.dispatchEvent(makePointerEvent('pointermove', { clientX: 40, clientY: 40 }))
+    await nextTick()
+
+    expect(diskSlot.classes()).toContain('is-drop-target')
+
+    document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape' }))
+    await nextTick()
+
+    expect(diskSlot.classes()).not.toContain('is-drop-target')
+
+    powerGrip.element.dispatchEvent(makePointerEvent('pointerup', { clientX: 40, clientY: 40 }))
+    await nextTick()
+
+    expect(storedLayout()).toBeNull()
+    expect(cardIds(wrapper.get('[data-testid="secondary-zone"]'))).toEqual([
+      'power',
+      'battery',
+      'disk',
+      'network',
+      'system',
+      'speedtest',
+    ])
   })
 })

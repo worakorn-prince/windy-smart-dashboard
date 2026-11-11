@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { useMetricsStore, severityOf, type SeverityLevel } from '@/stores/metrics'
 import StatRow from '@/components/dashboard/StatRow.vue'
@@ -21,14 +21,17 @@ import SpeedtestCard from '@/components/dashboard/SpeedtestCard.vue'
 import {
   CARD_DEFS,
   canMoveCard,
+  canSwapCards,
   loadLayout,
   moveCard,
   resetLayout,
   saveLayout,
+  swapCards,
   toggleHidden,
   zoneOf,
 } from '@/composables/useLayout'
 import type { CardDef, CardZone, LayoutState } from '@/composables/useLayout'
+import { useCardDrag } from '@/composables/useCardDrag'
 
 const store = useMetricsStore()
 const selectedPid = ref<number | null>(null)
@@ -201,6 +204,26 @@ function handlersFor(id: string): Record<string, (...args: any[]) => void> {
 onMounted(() => {
   store.connect()
 })
+
+const {
+  draggingId: dragId,
+  dropTargetId: dropTarget,
+  startDrag,
+  stop: stopCardDrag,
+} = useCardDrag({
+  canSwap: (fromId, toId) => canSwapCards(layout.value, fromId, toId),
+  onSwap: (fromId, toId) => {
+    layout.value = swapCards(layout.value, fromId, toId)
+  },
+})
+
+function isSpan2(id: string): boolean {
+  return id === 'cpu' || id === 'disk'
+}
+
+onBeforeUnmount(() => {
+  stopCardDrag()
+})
 </script>
 
 <template>
@@ -274,45 +297,69 @@ onMounted(() => {
     <section class="dash-split">
       <div class="dash-main">
         <div class="grid">
-          <component
-            :is="COMPONENTS[id]"
+          <div
             v-for="id in zoneCards('alerts')"
             :key="id"
+            class="card-slot"
+            :class="{
+              'slot-span-2': isSpan2(id),
+              'is-dragging': dragId === id,
+              'is-drop-target': dropTarget === id,
+            }"
             :data-card-id="id"
-            v-bind="propsFor(id)"
-            v-on="handlersFor(id)"
-          />
+          >
+            <span class="drag-grip" aria-hidden="true" @pointerdown="startDrag($event, id)">⠿</span>
+            <component :is="COMPONENTS[id]" v-bind="propsFor(id)" v-on="handlersFor(id)" />
+          </div>
         </div>
         <div class="grid primary-zone" data-testid="primary-zone">
-          <component
-            :is="COMPONENTS[id]"
+          <div
             v-for="id in zoneCards('primary')"
             :key="id"
+            class="card-slot"
+            :class="{
+              'slot-span-2': isSpan2(id),
+              'is-dragging': dragId === id,
+              'is-drop-target': dropTarget === id,
+            }"
             :data-card-id="id"
-            v-bind="propsFor(id)"
-            v-on="handlersFor(id)"
-          />
+          >
+            <span class="drag-grip" aria-hidden="true" @pointerdown="startDrag($event, id)">⠿</span>
+            <component :is="COMPONENTS[id]" v-bind="propsFor(id)" v-on="handlersFor(id)" />
+          </div>
         </div>
         <div class="grid secondary-zone" data-testid="secondary-zone">
           <template v-for="id in zoneCards('secondary')" :key="id">
-            <component
-              :is="COMPONENTS[id]"
+            <div
               v-if="id !== 'battery' || hasBattery"
+              class="card-slot"
+              :class="{
+                'slot-span-2': isSpan2(id),
+                'is-dragging': dragId === id,
+                'is-drop-target': dropTarget === id,
+              }"
               :data-card-id="id"
-              v-bind="propsFor(id)"
-              v-on="handlersFor(id)"
-            />
+            >
+              <span class="drag-grip" aria-hidden="true" @pointerdown="startDrag($event, id)">⠿</span>
+              <component :is="COMPONENTS[id]" v-bind="propsFor(id)" v-on="handlersFor(id)" />
+            </div>
           </template>
         </div>
         <div class="grid wide">
-          <component
-            :is="COMPONENTS[id]"
+          <div
             v-for="id in zoneCards('wide')"
             :key="id"
+            class="card-slot"
+            :class="{
+              'slot-span-2': isSpan2(id),
+              'is-dragging': dragId === id,
+              'is-drop-target': dropTarget === id,
+            }"
             :data-card-id="id"
-            v-bind="propsFor(id)"
-            v-on="handlersFor(id)"
-          />
+          >
+            <span class="drag-grip" aria-hidden="true" @pointerdown="startDrag($event, id)">⠿</span>
+            <component :is="COMPONENTS[id]" v-bind="propsFor(id)" v-on="handlersFor(id)" />
+          </div>
         </div>
       </div>
 
@@ -458,6 +505,45 @@ onMounted(() => {
 .grid.wide { grid-template-columns: 1fr; }
 /* RAM/GPU ได้ครึ่งความกว้างเต็มจอ (CPU span 2 อยู่เต็มแถวบน) — ขยายพื้นที่อ่านรายละเอียด */
 .primary-zone { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.card-slot { position: relative; min-width: 0; }
+.card-slot > .card { height: 100%; }
+.slot-span-2 { grid-column: span 2; }
+@media (max-width: 720px) {
+  .slot-span-2 { grid-column: auto; }
+}
+.drag-grip {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-ctl);
+  cursor: grab;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  opacity: .4;
+  font-size: 13px;
+  line-height: 1;
+  touch-action: none;
+  user-select: none;
+}
+.card-slot:hover .drag-grip { opacity: 1; }
+.drag-grip:active { cursor: grabbing; }
+/* power/history มี control ติดขอบขวาบน (ปุ่ม collapse / range tabs) — ย้าย grip ลงใต้ header */
+.card-slot[data-card-id="power"] .drag-grip {
+  top: 46px;
+}
+/* history: range tabs กินแถวแรก — ย้ายให้พ้นแถบ range (แถว tabs ข้างล่างว่างฝั่งขวา) */
+.card-slot[data-card-id="history"] .drag-grip {
+  top: 56px;
+}
+.is-dragging { opacity: .45; }
+.is-drop-target { outline: 2px solid var(--accent); outline-offset: -2px; }
 .layout-toolbar { position: relative; display: flex; gap: 8px; align-items: center; }
 .layout-btn {
   background: var(--panel);

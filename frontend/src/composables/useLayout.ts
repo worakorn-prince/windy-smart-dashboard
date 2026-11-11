@@ -199,6 +199,25 @@ export function moveCard(state: LayoutState, id: string, dir: -1 | 1): LayoutSta
   return next
 }
 
+export function canSwapCards(state: LayoutState, fromId: string, toId: string): boolean {
+  if (fromId === toId) return false
+  if (!state.order.includes(fromId) || !state.order.includes(toId)) return false
+  const fromZone = zoneOf(fromId)
+  const toZone = zoneOf(toId)
+  return fromZone !== null && toZone !== null && fromZone === toZone
+}
+
+export function swapCards(state: LayoutState, fromId: string, toId: string): LayoutState {
+  if (!canSwapCards(state, fromId, toId)) return state
+
+  const next = cloneLayout(state)
+  const fromIndex = next.order.indexOf(fromId)
+  const toIndex = next.order.indexOf(toId)
+  next.order[fromIndex] = toId
+  next.order[toIndex] = fromId
+  return next
+}
+
 export function toggleHidden(state: LayoutState, id: string): LayoutState {
   const next = cloneLayout(state)
   const zone = zoneOf(id)

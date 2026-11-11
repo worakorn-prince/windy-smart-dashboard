@@ -3,11 +3,13 @@ import {
   CARD_DEFS,
   LAYOUT_STORAGE_KEY,
   canMoveCard,
+  canSwapCards,
   defaultLayout,
   loadLayout,
   moveCard,
   resetLayout,
   saveLayout,
+  swapCards,
   toggleHidden,
 } from '@/composables/useLayout'
 import type { LayoutState } from '@/composables/useLayout'
@@ -266,6 +268,70 @@ describe('loadLayout', () => {
     expect(requiredSecondary.slice(1).every((id) => loaded.hidden.includes(id))).toBe(true)
     expect(loaded.hidden).toContain('battery')
     expect(loaded.hidden).toContain('speedtest')
+  })
+})
+
+describe('swapCards / canSwapCards', () => {
+  it('swaps two cards in the same zone and leaves hidden untouched', () => {
+    const base = defaultLayout()
+    const swapped = swapCards(base, 'power', 'disk')
+
+    expect(swapped).not.toBe(base)
+    expect(swapped.order).toEqual(
+      base.order.map((id) => (id === 'power' ? 'disk' : id === 'disk' ? 'power' : id)),
+    )
+    expect(idsInZone(swapped, 'secondary')).toEqual(['disk', 'battery', 'power', 'network', 'system', 'speedtest'])
+    expect(swapped.hidden).toEqual(base.hidden)
+    expect(swapped.hidden).toEqual([])
+  })
+
+  it('swaps primary zone cards', () => {
+    const swapped = swapCards(defaultLayout(), 'cpu', 'ram')
+
+    expect(idsInZone(swapped, 'primary')).toEqual(['ram', 'cpu', 'gpu'])
+  })
+
+  it('does not mutate the original state', () => {
+    const base = defaultLayout()
+    const snapshot = [...base.order]
+
+    swapCards(base, 'power', 'disk')
+
+    expect(base.order).toEqual(snapshot)
+  })
+
+  it('returns the same state reference when swapping across zones', () => {
+    const base = defaultLayout()
+    const swapped = swapCards(base, 'cpu', 'disk')
+
+    expect(swapped).toBe(base)
+    expect(swapped.order).toEqual(base.order)
+  })
+
+  it('returns the same state reference when from and to are identical', () => {
+    const base = defaultLayout()
+
+    expect(swapCards(base, 'cpu', 'cpu')).toBe(base)
+  })
+
+  it('returns the same state reference when an id is missing from order', () => {
+    const state: LayoutState = { order: ['cpu', 'ram'], hidden: [] }
+
+    expect(swapCards(state, 'cpu', 'ghost')).toBe(state)
+    expect(swapCards(state, 'ghost', 'cpu')).toBe(state)
+  })
+
+  it('canSwapCards accepts distinct same-zone ids and rejects the rest', () => {
+    const base = defaultLayout()
+
+    expect(canSwapCards(base, 'power', 'disk')).toBe(true)
+    expect(canSwapCards(base, 'cpu', 'gpu')).toBe(true)
+    expect(canSwapCards(base, 'history', 'adapters')).toBe(true)
+    expect(canSwapCards(base, 'cpu', 'cpu')).toBe(false)
+    expect(canSwapCards(base, 'cpu', 'disk')).toBe(false)
+    expect(canSwapCards(base, 'alerts', 'alert-rules')).toBe(true)
+    expect(canSwapCards(base, 'cpu', 'ghost')).toBe(false)
+    expect(canSwapCards({ order: ['cpu'], hidden: [] }, 'cpu', 'ram')).toBe(false)
   })
 })
 

@@ -128,3 +128,58 @@ test.describe('Security and maintenance pages', () => {
     await expect(wuCard.getByTestId('pending-reboot-badge')).toBeVisible()
   })
 })
+
+test.describe('Card drag & drop', () => {
+  test('dragging a card onto another swaps their positions and persists across reload', async ({ page }) => {
+    // 720px-tall default viewport clips the disk card (elementFromPoint returns null off-screen),
+    // so use a taller viewport to keep both cards hit-testable during the drag.
+    await page.setViewportSize({ width: 1280, height: 1400 })
+    await page.goto('/')
+
+    const powerGrip = page.locator('[data-card-id="power"] .drag-grip')
+    const diskSlot = page.locator('[data-card-id="disk"]')
+    await expect(powerGrip).toBeVisible()
+    await expect(diskSlot).toBeVisible()
+
+    const before = await page.evaluate(() => {
+      const raw = localStorage.getItem('dash:layout:v1')
+      return raw ? JSON.parse(raw) : null
+    })
+    if (before?.order && before.order.indexOf('disk') < before.order.indexOf('power')) {
+      await page.evaluate(() => localStorage.removeItem('dash:layout:v1'))
+      await page.reload()
+      await expect(page.locator('[data-card-id="power"] .drag-grip')).toBeVisible()
+    }
+
+    const from = await powerGrip.boundingBox()
+    const to = await diskSlot.boundingBox()
+    expect(from).not.toBeNull()
+    expect(to).not.toBeNull()
+
+    await page.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(to!.x + to!.width / 2, to!.y + to!.height / 2, { steps: 25 })
+    await page.mouse.up()
+
+    const after = await page.evaluate(() => {
+      const raw = localStorage.getItem('dash:layout:v1')
+      return raw ? JSON.parse(raw) : null
+    })
+    expect(after).not.toBeNull()
+    expect(after.order.indexOf('disk')).toBeLessThan(after.order.indexOf('power'))
+    expect(after.order.indexOf('power')).toBeGreaterThan(after.order.indexOf('disk'))
+
+    await page.reload()
+
+    const afterReload = await page.evaluate(() => {
+      const raw = localStorage.getItem('dash:layout:v1')
+      return raw ? JSON.parse(raw) : null
+    })
+    expect(afterReload).toEqual(after)
+
+    await expect(page.locator('[data-testid="secondary-zone"] .card-slot').first()).toHaveAttribute(
+      'data-card-id',
+      'disk',
+    )
+  })
+})
