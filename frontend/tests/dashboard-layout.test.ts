@@ -191,6 +191,24 @@ describe('Dashboard layout rendering', () => {
   })
 })
 
+describe('Dashboard visual shell', () => {
+  it('renders the page header, KPI row, process count and power total', async () => {
+    const { wrapper, store } = mountDashboard()
+
+    expect(wrapper.find('[data-testid="dashboard-head"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="dashboard-head"]').find('h1').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="stat-row"]').exists()).toBe(true)
+
+    expect(wrapper.get('[data-testid="process-count"]').text()).toBe(String(PROCESSES.length))
+
+    store.cpu = { overall: 12, power_watts: 89 } as never
+    store.gpu = { gpus: [{ gpu_usage_percent: 42, power_draw_watts: 120 }] } as never
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="power-total"]').text()).toBe('209 W')
+  })
+})
+
 describe('Dashboard layout toolbar', () => {
   it('moves, hides, and resets cards while persisting to localStorage', async () => {
     const { wrapper } = mountDashboard()

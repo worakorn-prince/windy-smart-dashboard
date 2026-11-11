@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **UI redesign** — new "pulse" dark system-monitor theme: design tokens
+  (`frontend/src/styles/tokens.css`), shared base styles (`base.css`), fixed left
+  sidebar shell with grouped nav and device card, KPI tile row with SVG
+  sparklines, restyled history chart with 5m/1h/6h/24h range tabs and gradient
+  area fills, and page headers across Security / Maintenance / Viewer.
+  All existing `data-testid` hooks and the light theme are preserved.
+- Theme colour of the PWA manifest and `index.html` updated to `#070b14`.
+
+### Added
+
+- `GET /api/history?range=5m` — new 5-minute history range (300 s).
+- `docs/UI-DESIGN.md` — design tokens, component inventory and verification guide.
+
 ## [0.5.1] - 2026-11-11
 
 ### Changed

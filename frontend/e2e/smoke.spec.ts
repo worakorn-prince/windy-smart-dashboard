@@ -33,6 +33,32 @@ test.describe('Shell and dashboard', () => {
     await expect(page.locator('[data-testid="secondary-zone"]')).toBeVisible()
   })
 
+  test('sidebar renders brand, grouped nav and device card', async ({ page }) => {
+    await page.goto('/')
+
+    await expect(page.getByTestId('sidebar')).toBeVisible()
+    await expect(page.getByTestId('side-nav')).toBeVisible()
+    await expect(page.getByTestId('device-card')).toBeVisible()
+    await expect(page.getByTestId('side-nav-dashboard')).toHaveClass(/is-active/)
+  })
+
+  test('dashboard shows page header and four KPI tiles', async ({ page }) => {
+    await page.goto('/')
+
+    await expect(page.getByTestId('dashboard-head')).toBeVisible()
+    await expect(page.getByTestId('stat-row')).toBeVisible()
+    for (const label of ['cpu', 'gpu', 'ram', 'power']) {
+      await expect(page.getByTestId(`stat-tile-${label}`)).toBeVisible()
+    }
+  })
+
+  test('history card exposes the 5m range tab', async ({ page }) => {
+    await page.goto('/')
+
+    await expect(page.getByTestId('history-tabs')).toBeVisible()
+    await expect(page.locator('button', { hasText: '5 นาที' })).toBeVisible()
+  })
+
   test('layout toolbar opens and closes the layout panel', async ({ page }) => {
     await page.goto('/')
 
@@ -77,7 +103,7 @@ test.describe('Security and maintenance pages', () => {
   test('maintenance page shows reports, startup and Windows Update sections', async ({ page }) => {
     await page.goto('/maintenance')
 
-    await expect(page.getByRole('heading', { level: 2, name: /Maintenance/ })).toBeVisible()
+    await expect(page.getByRole('heading', { level: 1, name: /บำรุงรักษาระบบ/ })).toBeVisible()
     await expect(page.getByRole('heading', { name: /Scheduled reports/ })).toBeVisible()
     await expect(page.getByRole('heading', { name: /เปิดพร้อม Windows/ })).toBeVisible()
 

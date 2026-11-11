@@ -28,8 +28,8 @@ describe('PWA manifest', () => {
   it('uses the dark theme colors and Thai language', () => {
     const manifest = JSON.parse(readPublic('manifest.webmanifest'))
 
-    expect(manifest.theme_color.toLowerCase()).toBe('#0f1020')
-    expect(manifest.background_color.toLowerCase()).toBe('#0f1020')
+    expect(manifest.theme_color.toLowerCase()).toBe('#070b14')
+    expect(manifest.background_color.toLowerCase()).toBe('#070b14')
     expect(manifest.lang).toBe('th')
     expect(manifest.scope).toBe('/')
   })
@@ -45,7 +45,7 @@ describe('index.html', () => {
 
   it('declares theme-color and apple touch icon', () => {
     expect(html).toContain('name="theme-color"')
-    expect(html).toContain('#0f1020')
+    expect(html).toContain('#070b14')
     expect(html).toContain('rel="apple-touch-icon"')
     expect(html).toContain('/icon.svg')
   })
@@ -66,6 +66,12 @@ describe('responsive styles', () => {
   it('collapses the grid to one column on phones', () => {
     const phoneBlock = app.slice(app.indexOf('@media (max-width: 640px)'))
     expect(phoneBlock).toContain('grid-template-columns: 1fr')
+  })
+
+  it('renders the sidebar shell with the theme toggle', () => {
+    expect(app).toContain('--sidebar-w')
+    expect(app).toContain('class="sidebar"')
+    expect(app).toContain('data-testid="theme-toggle"')
   })
 })
 
