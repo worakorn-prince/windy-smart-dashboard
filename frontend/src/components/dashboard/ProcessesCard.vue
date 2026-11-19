@@ -2,15 +2,30 @@
 import { computed } from 'vue'
 import { useMetricsStore, type ProcessInfo } from '@/stores/metrics'
 
-defineProps<{ processes: ProcessInfo[]; selectedPid?: number | null }>()
+const props = defineProps<{ processes: ProcessInfo[]; selectedPid?: number | null }>()
 const emit = defineEmits<{ select: [pid: number] }>()
 
 const store = useMetricsStore()
 
+const visibleProcesses = computed(() => props.processes.filter((process) => {
+  return process.pid !== 0 && process.name.trim().toLowerCase() !== 'system idle process'
+}))
+
+const cpuCores = computed(() => {
+  const count = store.processesCpuCount ?? store.cpu?.core_count ?? navigator.hardwareConcurrency ?? 1
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 1
+})
+
+const cpuScaleLabel = computed(() => {
+  const cores = cpuCores.value
+  if (cores === 1) return 'CPU % เทียบทั้งระบบ'
+  return `CPU % เทียบทั้งระบบ · 1 คอร์ = ${Number((100 / cores).toFixed(2))}%`
+})
+
 const totalRamGb = computed<number | null>(() => {
   const total = store.ram?.total
   if (typeof total !== 'number' || !Number.isFinite(total) || total <= 0) return null
-  return total
+  return total / (1024 ** 3)
 })
 
 function truncateName(name: string, max = 28): string {
@@ -37,10 +52,11 @@ function ramText(p: ProcessInfo): string {
   <div class="card processes-card">
     <h3 class="card-title">
       <span>โปรเซสส์ที่กำลังทำงาน</span>
-      <span class="count-badge" data-testid="process-count">{{ processes.length }}</span>
+      <span class="count-badge" data-testid="process-count">{{ visibleProcesses.length }}</span>
     </h3>
+    <p class="cpu-scale" data-testid="process-cpu-scale">{{ cpuScaleLabel }}</p>
 
-    <table v-if="processes.length" class="proc-table">
+    <table v-if="visibleProcesses.length" class="proc-table">
       <thead>
         <tr>
           <th class="col-name">ชื่อโปรเซส</th>
@@ -50,7 +66,7 @@ function ramText(p: ProcessInfo): string {
       </thead>
       <tbody>
         <tr
-          v-for="p in processes"
+          v-for="p in visibleProcesses"
           :key="p.pid"
           class="clickable"
           :class="{ selected: p.pid === selectedPid }"
@@ -79,7 +95,7 @@ function ramText(p: ProcessInfo): string {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 0 12px;
+  margin: 0 0 4px;
   font-size: 14px;
   font-weight: 700;
   color: var(--text);
@@ -87,6 +103,11 @@ function ramText(p: ProcessInfo): string {
   letter-spacing: normal;
   overflow: visible;
   white-space: normal;
+}
+.cpu-scale {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 11px;
 }
 .count-badge {
   display: inline-flex;

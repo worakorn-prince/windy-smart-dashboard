@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import ipaddress
 import json
 import logging
@@ -41,6 +42,7 @@ import re
 import socket
 import threading
 import time
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -117,6 +119,86 @@ _NET_CACHE_TTL = 5.0
 _net_cache_lock = threading.Lock()
 _net_cache: tuple[float, list[dict[str, Any]]] | None = None
 
+_CACHE_MISS = object()
+
+
+class _SingleFlightCache:
+    def __init__(
+        self,
+        producer: Callable[[], tuple[Callable[..., Any], tuple[Any, ...]]],
+        max_age: float,
+    ) -> None:
+        self._producer = producer
+        self._max_age = max_age
+        self._value: Any = _CACHE_MISS
+        self._updated_at = 0.0
+        self._locks: dict[asyncio.AbstractEventLoop, asyncio.Lock] = {}
+
+    def _lock(self) -> asyncio.Lock:
+        loop = asyncio.get_running_loop()
+        lock = self._locks.get(loop)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[loop] = lock
+        return lock
+
+    async def _produce(self) -> Any:
+        producer, args = self._producer()
+        call = type(producer).__call__
+        if inspect.iscoroutinefunction(producer) or inspect.iscoroutinefunction(call):
+            result = producer(*args)
+            if not inspect.isawaitable(result):
+                raise TypeError("async cache producer did not return an awaitable")
+            return await result
+        result = await asyncio.to_thread(producer, *args)
+        if inspect.isawaitable(result):
+            return await result
+        return result
+
+    def clear(self) -> None:
+        self._value = _CACHE_MISS
+        self._updated_at = 0.0
+        self._locks.clear()
+
+    async def get(
+        self,
+        refresh_if_stale: bool = True,
+        max_age: float | None = None,
+    ) -> tuple[Any, bool]:
+        effective_max_age = self._max_age if max_age is None else max_age
+        allowed_age = effective_max_age if refresh_if_stale else effective_max_age * 3
+
+        now = time.monotonic()
+        if self._value is not _CACHE_MISS and now - self._updated_at <= allowed_age:
+            return self._value, False
+
+        async with self._lock():
+            now = time.monotonic()
+            if self._value is not _CACHE_MISS and now - self._updated_at <= allowed_age:
+                return self._value, False
+            value = await self._produce()
+            self._value = value
+            self._updated_at = time.monotonic()
+            return value, True
+
+
+_processes_snapshot_cache = _SingleFlightCache(
+    lambda: (metrics.processes_snapshot, (10,)),
+    PROCESS_INTERVAL,
+)
+_system_snapshot_cache = _SingleFlightCache(
+    lambda: (metrics.system_snapshot, ()),
+    UPTIME_INTERVAL,
+)
+_full_snapshot_cache = _SingleFlightCache(
+    lambda: (metrics.full_snapshot_async, ()),
+    METRICS_FULL_INTERVAL,
+)
+
+
+async def _get_full_snapshot(max_age: float) -> tuple[dict[str, Any], bool]:
+    return await _full_snapshot_cache.get(refresh_if_stale=True, max_age=max_age)
+
 
 def security_event_payload(evt: sec_monitor.Event) -> dict[str, Any]:
     """Canonical WS payload for live security events.
@@ -186,6 +268,15 @@ async def lifespan(app: FastAPI):
     sec_mon = sec_monitor.SecurityMonitor(on_event=broadcast_security_event,
                                           suspicious=list(suspicious_countries_state))
     await sec_mon.start()
+
+    prewarm_results = await asyncio.gather(
+        _processes_snapshot_cache.get(refresh_if_stale=True),
+        _system_snapshot_cache.get(refresh_if_stale=True),
+        return_exceptions=True,
+    )
+    for result in prewarm_results:
+        if isinstance(result, Exception):
+            logger.error("metrics cache pre-warm failed: %s", result)
 
     metrics_task = asyncio.create_task(_metrics_loop())
     process_task = asyncio.create_task(_process_loop())
@@ -262,9 +353,13 @@ async def _metrics_loop() -> None:
             await manager.broadcast("metrics", {"type": "metrics", **snap})
             if now - last_full >= METRICS_FULL_INTERVAL:
                 last_full = now
-                full = await asyncio.to_thread(metrics.full_snapshot)
-                full["ping"] = {"target": PING_TARGET, "latency_ms": last_ping_v}
-                await manager.broadcast("metrics", {"type": "metrics", **full})
+                full, freshly_computed = await _full_snapshot_cache.get(refresh_if_stale=True)
+                if freshly_computed:
+                    full_payload = {
+                        **full,
+                        "ping": {"target": PING_TARGET, "latency_ms": last_ping_v},
+                    }
+                    await manager.broadcast("metrics", {"type": "metrics", **full_payload})
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -276,8 +371,11 @@ async def _process_loop() -> None:
     """Push top-N processes every PROCESS_INTERVAL seconds."""
     while True:
         try:
-            procs = metrics.processes_snapshot(top_n=10)
+            procs, _freshly_computed = await _processes_snapshot_cache.get(
+                refresh_if_stale=True,
+            )
             await manager.broadcast("metrics", {"type": "processes", "processes": procs,
+                                                "cpu_count": metrics.cpu_count(),
                                                 "ts": datetime.now().isoformat()})
         except asyncio.CancelledError:
             raise
@@ -289,15 +387,18 @@ async def _process_loop() -> None:
 def _collect_process_samples(top_n: int = 20) -> list[dict[str, Any]]:
     """Return the top-N processes by RSS for the process history table."""
     procs: list[dict[str, Any]] = []
+    cores = metrics.cpu_count()
     for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info"]):
         try:
             info = p.info
+            if metrics.is_idle_process(info["pid"], info.get("name")):
+                continue
             mem = info.get("memory_info")
             rss = getattr(mem, "rss", 0) or 0
             procs.append({
                 "pid": info["pid"],
                 "name": info.get("name") or "",
-                "cpu_pct": round(info.get("cpu_percent") or 0.0, 1),
+                "cpu_pct": round((info.get("cpu_percent") or 0.0) / cores, 1),
                 "mem_mb": round(rss / (1024 * 1024), 2),
             })
         except Exception:
@@ -394,6 +495,8 @@ def _child_nodes(proc: Any, depth: int) -> list[dict[str, Any]]:
 
 def _process_detail(pid: int) -> dict[str, Any]:
     """Build the process drilldown payload (raises 404 for unknown pids)."""
+    if pid <= 0:
+        raise HTTPException(status_code=404, detail="process_not_found")
     try:
         proc = psutil.Process(pid)
     except (psutil.NoSuchProcess, psutil.AccessDenied) as exc:
@@ -416,7 +519,10 @@ def _process_detail(pid: int) -> dict[str, Any]:
         "username": _safe_attr(proc.username, "") or "",
         "status": _safe_attr(proc.status, "unknown") or "unknown",
         "create_time": _safe_attr(proc.create_time, None),
-        "cpu_pct": round(_safe_attr(lambda: proc.cpu_percent(interval=None), 0.0) or 0.0, 1),
+        "cpu_pct": round(
+            (_safe_attr(lambda: proc.cpu_percent(interval=None), 0.0) or 0.0) / metrics.cpu_count(),
+            1,
+        ),
         "mem_mb": round(rss / (1024 * 1024), 2),
         "mem_pct": round(_safe_attr(proc.memory_percent, 0.0) or 0.0, 2),
         "parent": parent,
@@ -430,8 +536,10 @@ async def _uptime_loop() -> None:
     """Push uptime refresh every UPTIME_INTERVAL seconds."""
     while True:
         try:
-            await manager.broadcast("metrics",
-                                     {"type": "system", "system": metrics.system_snapshot()})
+            system, _freshly_computed = await _system_snapshot_cache.get(
+                refresh_if_stale=True,
+            )
+            await manager.broadcast("metrics", {"type": "system", "system": system})
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -940,21 +1048,30 @@ async def api_export(payload: dict[str, Any]) -> Response:
 @app.websocket("/ws/metrics")
 async def ws_metrics(ws: WebSocket) -> None:
     await ws.accept()
-    manager.metrics.add(ws)
     try:
-        # Greet the new client with the initial snapshot.
-        await ws.send_json({"type": "metrics",
-                            **metrics.full_snapshot(),
-                            "ping": {"latency_ms": 0, "target": PING_TARGET}})
-        await ws.send_json({"type": "system", "system": metrics.system_snapshot()})
+        processes, _freshly_computed = await _processes_snapshot_cache.get(
+            refresh_if_stale=False,
+        )
         await ws.send_json({"type": "processes",
-                            "processes": metrics.processes_snapshot(),
+                            "processes": processes,
+                            "cpu_count": metrics.cpu_count(),
                             "ts": datetime.now().isoformat()})
+        system, _freshly_computed = await _system_snapshot_cache.get(
+            refresh_if_stale=False,
+        )
+        await ws.send_json({"type": "system", "system": system})
+        full, _freshly_computed = await _full_snapshot_cache.get(refresh_if_stale=False)
+        await ws.send_json({"type": "metrics",
+                            **full,
+                            "ping": {"latency_ms": 0, "target": PING_TARGET}})
+        # Keep new clients outside the broadcast set until the complete snapshot is
+        # sent; live deltas contain partial metric objects and break frontend state.
+        manager.metrics.add(ws)
         # Keep the socket open until disconnect.
         while True:
             await ws.receive_text()
-    except WebSocketDisconnect:
-        pass
+    except (WebSocketDisconnect, RuntimeError) as exc:
+        logger.debug("metrics websocket disconnected: %s", exc)
     finally:
         manager.metrics.discard(ws)
 

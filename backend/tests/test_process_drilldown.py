@@ -119,6 +119,7 @@ def _net_rows() -> list[dict]:
 def _patch_process_env(monkeypatch) -> None:
     _, table = _tree()
     monkeypatch.setattr(main, "psutil", FakePsutil(table))
+    monkeypatch.setattr(main.metrics, "cpu_count", lambda: 1)
     monkeypatch.setattr(main, "_net_connection_rows", _net_rows)
 
 
@@ -166,6 +167,25 @@ def test_detail_404_for_unknown_pid(client, monkeypatch, ph_db):
     r = client.get("/api/processes/999")
     assert r.status_code == 404
     assert r.json()["detail"] == "process_not_found"
+
+
+def test_detail_cpu_pct_is_normalized_to_system_total(client, monkeypatch, ph_db):
+    _patch_process_env(monkeypatch)
+    monkeypatch.setattr(main.metrics, "cpu_count", lambda: 4)
+
+    r = client.get("/api/processes/100")
+
+    assert r.status_code == 200
+    assert r.json()["cpu_pct"] == 3.1
+
+
+def test_detail_rejects_non_positive_pids(client, monkeypatch, ph_db):
+    _patch_process_env(monkeypatch)
+
+    for pid in (0, -1):
+        r = client.get(f"/api/processes/{pid}")
+        assert r.status_code == 404
+        assert r.json()["detail"] == "process_not_found"
 
 
 def test_history_record_query_roundtrip(client, ph_db):

@@ -1082,16 +1082,38 @@ def _get_wmi_gpus() -> list[dict[str, Any]]:
 # System
 # =============================================================================
 
+IDLE_PROCESS_PID = 0
+IDLE_PROCESS_NAMES = {"system idle process", "idle"}
+
+
+def cpu_count() -> int:
+    """จำนวน logical CPU (fallback 1) — single source of truth สำหรับ normalize."""
+    try:
+        return int(psutil.cpu_count() or 1)
+    except Exception:
+        return 1
+
+
+def is_idle_process(pid: int, name: str | None = None) -> bool:
+    """True สำหรับ Windows pseudo-process PID 0 / ชื่อ 'System Idle Process'."""
+    if int(pid) == IDLE_PROCESS_PID:
+        return True
+    return (name or "").strip().lower() in IDLE_PROCESS_NAMES
+
+
 def processes_snapshot(top_n: int = 10) -> list[dict[str, Any]]:
     procs = []
+    cores = cpu_count()
     for p in psutil.process_iter(["pid", "name", "username", "cpu_percent", "memory_percent"]):
         try:
             info = p.info
+            if is_idle_process(info["pid"], info["name"]):
+                continue
             procs.append({
                 "pid": info["pid"],
                 "name": info["name"] or "",
                 "user": info["username"] or "",
-                "cpu": round(info["cpu_percent"] or 0.0, 1),
+                "cpu": round((info["cpu_percent"] or 0.0) / cores, 1),
                 "ram_percent": round(info["memory_percent"] or 0.0, 2),
             })
         except (psutil.NoSuchProcess, psutil.AccessDenied):

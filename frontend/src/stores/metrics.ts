@@ -330,6 +330,7 @@ export const useMetricsStore = defineStore('metrics', () => {
   const system = ref<SystemInfo | null>(null)
   const gpu = ref<GpuSnapshot | null>(null)
   const processes = ref<ProcessInfo[]>([])
+  const processesCpuCount = ref<number | null>(null)
   const ping = ref<{ latency_ms: number; target: string }>({ latency_ms: 0, target: '1.1.1.1' })
 
   const cpuHistory = ref<number[]>([])
@@ -384,6 +385,9 @@ export const useMetricsStore = defineStore('metrics', () => {
       system.value = data.system
     } else if (data.type === 'processes') {
       processes.value = data.processes || []
+      if (typeof data.cpu_count === 'number' && Number.isFinite(data.cpu_count) && data.cpu_count > 0) {
+        processesCpuCount.value = data.cpu_count
+      }
     } else if (data.type === 'speedtest_result') {
       speedtest.value = data
       speedtestRunning.value = false
@@ -529,7 +533,7 @@ export const useMetricsStore = defineStore('metrics', () => {
   const sensorStatus = computed(() => system.value?.sensors ?? null)
 
   return {
-    cpu, ram, disk, network, system, gpu, processes, ping,
+    cpu, ram, disk, network, system, gpu, processes, processesCpuCount, ping,
     cpuHistory, ramHistory, netSendHistory, netRecvHistory,
     speedtest, speedtestRunning,
     alerts, alertRules, alertRulesSaving, alertRulesError,

@@ -52,6 +52,27 @@ test.describe('Shell and dashboard', () => {
     }
   })
 
+  test('process card excludes System Idle Process and keeps CPU percentages within 100', async ({ page }) => {
+    const pageErrors: string[] = []
+    page.on('pageerror', (error) => pageErrors.push(error.message))
+    await page.goto('/')
+
+    const processCard = page.locator('[data-card-id="processes"]')
+    const cpuValues = processCard.locator('.cpu-value')
+    await expect(cpuValues.first()).toBeVisible()
+    await expect(processCard).not.toContainText(/system idle process/i)
+
+    const values = await cpuValues.allTextContents()
+    expect(values.length).toBeGreaterThan(0)
+    for (const value of values) {
+      const percent = Number.parseFloat(value)
+      expect(Number.isFinite(percent)).toBe(true)
+      expect(percent).toBeGreaterThanOrEqual(0)
+      expect(percent).toBeLessThanOrEqual(100)
+    }
+    expect(pageErrors).toEqual([])
+  })
+
   test('history card exposes the 5m range tab', async ({ page }) => {
     await page.goto('/')
 
@@ -131,8 +152,9 @@ test.describe('Security and maintenance pages', () => {
 
 test.describe('Card drag & drop', () => {
   test('dragging a card onto another swaps their positions and persists across reload', async ({ page }) => {
-    // 720px-tall default viewport clips the disk card (elementFromPoint returns null off-screen),
-    // so use a taller viewport to keep both cards hit-testable during the drag.
+    // Cards grow once live metrics arrive; a fixed viewport can push the drop target
+    // off-screen (elementFromPoint returns null), so size the viewport from the real
+    // layout after data has loaded instead of hard-coding a height.
     await page.setViewportSize({ width: 1280, height: 1400 })
     await page.goto('/')
 
@@ -150,11 +172,32 @@ test.describe('Card drag & drop', () => {
       await page.reload()
       await expect(page.locator('[data-card-id="power"] .drag-grip')).toBeVisible()
     }
+    // Cards grow once live metrics arrive (~1.8kpx above the disk slot); measuring
+    // before that paints an empty (short) layout and the WS payload lands mid-drag,
+    // moving the drop target. Wait for data before measuring anything.
+    await expect(page.locator('[data-card-id="processes"] tbody tr').first()).toBeVisible()
 
     const from = await powerGrip.boundingBox()
     const to = await diskSlot.boundingBox()
     expect(from).not.toBeNull()
     expect(to).not.toBeNull()
+    if (to && to.y + to.height > 1400) {
+      // Grow the viewport so the drop target stays hit-testable, then re-measure
+      // both endpoints in case the resize reflowed the layout.
+      await page.setViewportSize({ width: 1280, height: Math.ceil(to.y + to.height + 100) })
+      const refreshedFrom = await powerGrip.boundingBox()
+      const refreshedTo = await diskSlot.boundingBox()
+      expect(refreshedFrom).not.toBeNull()
+      expect(refreshedTo).not.toBeNull()
+      from!.x = refreshedFrom!.x
+      from!.y = refreshedFrom!.y
+      from!.width = refreshedFrom!.width
+      from!.height = refreshedFrom!.height
+      to.x = refreshedTo!.x
+      to.y = refreshedTo!.y
+      to.width = refreshedTo!.width
+      to.height = refreshedTo!.height
+    }
 
     await page.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2)
     await page.mouse.down()

@@ -221,7 +221,7 @@ onBeforeUnmount(() => {
               <dt>User</dt><dd>{{ detail.username || '-' }}</dd>
               <dt>Status</dt><dd>{{ detail.status }}</dd>
               <dt>Started</dt><dd>{{ fmtTime(detail.create_time) }}</dd>
-              <dt>CPU</dt><dd>{{ detail.cpu_pct.toFixed(1) }}%</dd>
+              <dt title="CPU % เทียบทั้งระบบ">CPU</dt><dd>{{ detail.cpu_pct.toFixed(1) }}%</dd>
               <dt>RAM</dt><dd>{{ detail.mem_mb.toFixed(1) }} MB ({{ detail.mem_pct.toFixed(1) }}%)</dd>
               <dt>Connections</dt><dd>{{ detail.connections_count }}</dd>
               <dt>Cmdline</dt><dd class="cmdline">{{ detail.cmdline.join(' ') || '-' }}</dd>
