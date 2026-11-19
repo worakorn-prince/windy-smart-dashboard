@@ -58,6 +58,7 @@ from fastapi.staticfiles import StaticFiles
 import config
 import disk_health
 import history
+import insights
 from maintenance.router import router as maintenance_router
 from viewer_api import router as viewer_router
 import metrics
@@ -194,6 +195,14 @@ _full_snapshot_cache = _SingleFlightCache(
     lambda: (metrics.full_snapshot_async, ()),
     METRICS_FULL_INTERVAL,
 )
+
+ANOMALIES_CACHE_TTL = 30.0
+ANOMALY_RANGES: tuple[str, ...] = ("24h", "7d", "30d")
+_anomalies_caches: dict[str, _SingleFlightCache] = {
+    rng: _SingleFlightCache(lambda rng=rng: (insights.compute_anomalies, (rng,)),
+                            ANOMALIES_CACHE_TTL)
+    for rng in ANOMALY_RANGES
+}
 
 
 async def _get_full_snapshot(max_age: float) -> tuple[dict[str, Any], bool]:
@@ -738,6 +747,15 @@ async def api_sensors_status() -> dict[str, Any]:
 async def api_history(rng: Literal["5m", "1h", "6h", "24h"] = Query(default="1h", alias="range")) -> dict[str, Any]:
     """Return bucketed metrics history, rejecting unknown ranges with 422."""
     return await asyncio.to_thread(history.query_range, rng)
+
+
+@app.get("/api/anomalies")
+async def api_anomalies(
+    rng: Literal["24h", "7d", "30d"] = Query(default="24h", alias="range"),
+) -> dict[str, Any]:
+    """Baseline profiles + ongoing anomalies over metrics history (read-only)."""
+    payload, _freshly_computed = await _anomalies_caches[rng].get(refresh_if_stale=True)
+    return payload
 
 
 @app.get("/api/processes/{pid}")
