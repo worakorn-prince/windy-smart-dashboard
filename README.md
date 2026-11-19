@@ -25,6 +25,12 @@ Built with FastAPI (Python 3.12) + Vue 3 / TypeScript / Vite.
 > packaging (`scripts/package_portable.py`), an OpenAPI docs + `/api/version`
 > endpoint, and a Playwright E2E smoke suite.
 
+> ✨ **What's new in v0.6.2** — the Processes card is trustworthy: no more
+> `System Idle Process` at 400–700% CPU with 0 GB RAM (PID 0 is filtered and
+> per-process CPU% is normalized per core, so rows read 0–100%), first
+> dashboard data now arrives in about a second instead of 15s or more, and
+> opening extra tabs no longer multiplies snapshot work behind the scenes.
+
 > ✨ **What's new in v0.6.1** — drag & drop card reordering on the dashboard
 > (drag a card's grip onto another card in the same zone to swap them; the
 > arrangement persists) and a fix for the RAM KPI tile that displayed raw

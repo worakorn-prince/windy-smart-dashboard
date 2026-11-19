@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-11-19
+
+### Fixed
+
+- **System Idle Process no longer listed**: the Processes card excluded PID 0,
+  whose inflated CPU% (400–700% on an 8-core machine: idle is accumulated
+  across all cores) and fake 8 KB working set (RAM 0 GB) made the card useless.
+  Per-process CPU% is now normalized against the logical core count, so every
+  row reads 0–100% against the whole system (scale label: `1 core = 12.5%`).
+- **First dashboard data arrives in ~1s instead of 15s+**: the WebSocket
+  greeting no longer runs synchronous `psutil` enumeration (8–25s full
+  snapshots) on the event loop. Greeting order is now processes → system →
+  full metrics, and a new client joins the live broadcast only *after*
+  receiving the full snapshot — fixing Vue render crashes caused by partial
+  live payloads hitting cards that read nested fields unguarded.
+- **Opening tabs no longer multiplies snapshot work**: a single-flight cache
+  covers the processes/system/full snapshots (soft TTL = interval, hard limit
+  = 3×interval, per-event-loop locks), so one page open computes the full
+  snapshot exactly once and late joiners reuse it. Processes/system are
+  pre-warmed at startup.
+
+### Changed
+
+- `APP_VERSION`, the maintenance `MODULE_VERSION`, `frontend/package.json` and
+  `frontend/package-lock.json` bumped to `0.6.2`.
+- The drag & drop E2E test no longer depends on the old slow WebSocket
+  greeting: it waits for live data and sizes the viewport from the real
+  layout before dragging (the drop target used to fall outside the fixed
+  1400px viewport once cards grew with data).
+
 ## [0.6.1] - 2026-11-12
 
 ### Added
