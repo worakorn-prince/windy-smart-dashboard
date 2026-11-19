@@ -20,6 +20,7 @@ Endpoints:
   GET /api/security/blocked          — list block rules
   GET /api/security/events           — persisted security event history (admin)
   POST /api/security/export          — {fmt: pdf|html|json} -> returns file
+  GET /api/insights                  — aggregated /insights overview (read-only)
   GET /api/processes/{pid}           — process detail + parent/child tree + ports
   GET /api/processes/{pid}/history   — per-process CPU/RAM samples (newest last)
   GET /api/health/disk               — disk usage, SMART health, days-to-full
@@ -59,6 +60,7 @@ import config
 import disk_health
 import history
 import insights
+import insights_overview
 from maintenance.router import router as maintenance_router
 from viewer_api import router as viewer_router
 import metrics
@@ -202,6 +204,14 @@ _anomalies_caches: dict[str, _SingleFlightCache] = {
     rng: _SingleFlightCache(lambda rng=rng: (insights.compute_anomalies, (rng,)),
                             ANOMALIES_CACHE_TTL)
     for rng in ANOMALY_RANGES
+}
+
+INSIGHTS_CACHE_TTL = 60.0
+INSIGHT_RANGES: tuple[str, ...] = ("24h", "7d", "30d")
+_insights_caches: dict[str, _SingleFlightCache] = {
+    rng: _SingleFlightCache(lambda rng=rng: (insights_overview.compute_insights, (rng,)),
+                            INSIGHTS_CACHE_TTL)
+    for rng in INSIGHT_RANGES
 }
 
 
@@ -755,6 +765,16 @@ async def api_anomalies(
 ) -> dict[str, Any]:
     """Baseline profiles + ongoing anomalies over metrics history (read-only)."""
     payload, _freshly_computed = await _anomalies_caches[rng].get(refresh_if_stale=True)
+    return payload
+
+
+@app.get("/api/insights")
+async def api_insights(
+    rng: Literal["24h", "7d", "30d"] = Query(default="24h", alias="range"),
+) -> dict[str, Any]:
+    """Aggregated /insights overview (trends, disk, processes, maintenance,
+    security, baseline + anomalies) over history tables (read-only)."""
+    payload, _freshly_computed = await _insights_caches[rng].get(refresh_if_stale=True)
     return payload
 
 
