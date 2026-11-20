@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard.vue'
 import Security from './pages/Security.vue'
 import Maintenance from './pages/Maintenance.vue'
 import Insights from './pages/Insights.vue'
+import InternetInsights from '@/components/internet/InternetInsights.vue'
 import { autoTip } from './directives/autoTip'
 
 const router = createRouter({
@@ -17,6 +18,7 @@ const router = createRouter({
     { path: '/security', name: 'security', component: Security },
     { path: '/maintenance', name: 'maintenance', component: Maintenance },
     { path: '/insights', name: 'insights', component: Insights },
+    { path: '/internet-insights', name: 'internet-insights', component: InternetInsights },
   ],
 })
 

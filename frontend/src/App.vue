@@ -59,6 +59,7 @@ store.connect()
       <nav class="side-nav-extra" data-testid="side-nav-insights-group">
         <p class="nav-group">ANALYTICS</p>
         <RouterLink to="/insights" exact-active-class="is-active" data-testid="side-nav-insights">Insights</RouterLink>
+        <RouterLink to="/internet-insights" exact-active-class="is-active" data-testid="side-nav-internet-insights">Internet Insights</RouterLink>
       </nav>
 
       <div class="device-card" data-testid="device-card">

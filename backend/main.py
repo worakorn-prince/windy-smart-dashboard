@@ -63,6 +63,7 @@ import insights
 import insights_overview
 from maintenance.router import router as maintenance_router
 from viewer_api import router as viewer_router
+from internet_insights.router import router as internet_insights_router
 import metrics
 import process_history
 import reports
@@ -1143,6 +1144,7 @@ async def ws_security(ws: WebSocket) -> None:
 
 app.include_router(maintenance_router)
 app.include_router(viewer_router)
+app.include_router(internet_insights_router)
 
 # ---- Serving frontend (production) ---- #
 
