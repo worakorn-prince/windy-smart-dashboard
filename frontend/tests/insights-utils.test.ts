@@ -29,9 +29,16 @@ describe('insights utils — epoch (effective_window) vs ISO TEXT parsing', () =
   it('treats naive local stamps (security_events/generated_at) as local wall clock, not UTC', () => {
     const naive = '2026-01-01T10:30:00'
     const d = isoTextToDate(naive)
+    expect(d).not.toBeNull()
+    // On non-UTC systems, naive timestamps parse as local time (different from UTC).
+    // On UTC runners (like GitHub Actions), local time = UTC, so we can't assert inequality.
+    // The key behavior: parsing succeeds and formatNaiveStamp renders the literal time.
     const local = new Date(2026, 0, 1, 10, 30, 0)
     expect(d!.getTime()).toBe(local.getTime())
-    expect(d!.getTime()).not.toBe(Date.UTC(2026, 0, 1, 10, 30, 0))
+    const runnerTzOffset = new Date().getTimezoneOffset()
+    if (runnerTzOffset !== 0) {
+      expect(d!.getTime()).not.toBe(Date.UTC(2026, 0, 1, 10, 30, 0))
+    }
   })
 
   it('renders naive stamps as-is (never shifted to UTC)', () => {
