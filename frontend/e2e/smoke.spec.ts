@@ -152,6 +152,10 @@ test.describe('Security and maintenance pages', () => {
 
 test.describe('Insights page', () => {
   test('/insights shows sidebar entry and summary cards with real data', async ({ page }) => {
+    // The 60s canvas wait below exceeds the global 45s test timeout: on a loaded
+    // runner (cold vite compile + backend compute) the test gets cut before the
+    // expect can finish. Give this test its own ceiling that fits the wait.
+    test.setTimeout(120_000)
     await page.goto('/insights')
 
     await expect(page.getByTestId('side-nav-insights')).toBeVisible()
