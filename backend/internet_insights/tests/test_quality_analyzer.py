@@ -217,7 +217,7 @@ class TestQualityAnalyzerFullAnalysis:
             assert results[target_id].sample_count == 10
 
     def test_get_overall_status_good(self, analyzer: QualityAnalyzer):
-        from internet_insights.analyzers.quality import QualityAnalysis, LatencyStats, JitterStats, LossBreakdown, DegradationEvidence
+        from internet_insights.analyzers.quality import QualityAnalysis, DegradationEvidence
         analyses = {
             "primary": QualityAnalysis(
                 target_id="primary",
@@ -260,7 +260,7 @@ class TestQualityAnalyzerFullAnalysis:
         assert status["degraded_targets"] == []
 
     def test_get_overall_status_degraded(self, analyzer: QualityAnalyzer):
-        from internet_insights.analyzers.quality import QualityAnalysis, LatencyStats, JitterStats, LossBreakdown, DegradationEvidence
+        from internet_insights.analyzers.quality import QualityAnalysis, DegradationEvidence
         analyses = {
             "primary": QualityAnalysis(
                 target_id="primary",
@@ -302,7 +302,7 @@ class TestQualityAnalyzerFullAnalysis:
         assert "primary" in status["degraded_targets"]
 
     def test_get_overall_status_poor(self, analyzer: QualityAnalyzer):
-        from internet_insights.analyzers.quality import QualityAnalysis, LatencyStats, JitterStats, LossBreakdown, DegradationEvidence
+        from internet_insights.analyzers.quality import QualityAnalysis, DegradationEvidence
         analyses = {
             "primary": QualityAnalysis(
                 target_id="primary",

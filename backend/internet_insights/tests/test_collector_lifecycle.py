@@ -10,7 +10,6 @@ import pytest
 
 from internet_insights.collectors.quality import QualityCollector
 from internet_insights.collectors.interface import InterfaceCollector
-from internet_insights.collectors.tcp_stats import TcpStatsCollector
 from internet_insights.services.collector_manager import CollectorManager
 from internet_insights.storage.repositories import QualitySampleRepository, InterfaceSampleRepository, TcpStatsRepository
 from internet_insights.storage.database import InternetInsightsDB

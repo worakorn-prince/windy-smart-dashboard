@@ -10,9 +10,11 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
-from .quality import QualityCollector
-from .interface import InterfaceCollector
-from .tcp_stats import TcpStatsCollector
+from .quality import QualityCollector as QualityCollector
+from .interface import InterfaceCollector as InterfaceCollector
+from .tcp_stats import TcpStatsCollector as TcpStatsCollector
+
+__all__ = ["Collector", "CollectorConfig", "InterfaceCollector", "QualityCollector", "TcpStatsCollector"]
 
 logger = logging.getLogger("dashboard.internet_insights.collectors")
 

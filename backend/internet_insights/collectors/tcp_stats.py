@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import ctypes
 import logging
 import platform
@@ -223,6 +224,3 @@ class TcpStatsCollector:
             "platform": platform.system(),
             "windows_api_available": self._iphlpapi is not None,
         }
-
-
-import contextlib

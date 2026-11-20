@@ -14,6 +14,19 @@ logger = logging.getLogger("dashboard.internet_insights.router")
 
 router = APIRouter(prefix="/api/internet", tags=["Internet Insights"])
 
+VALID_RANGES = ("5m", "1h", "6h", "24h", "7d", "30d")
+RANGE_SECONDS = {"5m": 300, "1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800, "30d": 2592000}
+
+
+def _validate_range(range: str) -> int:
+    """Validate range parameter and return seconds, or raise HTTPException."""
+    if range not in VALID_RANGES:
+        raise HTTPException(status_code=422, detail=f"Invalid range. Must be one of: {sorted(VALID_RANGES)}")
+    return RANGE_SECONDS[range]
+
+
+router = APIRouter(prefix="/api/internet", tags=["Internet Insights"])
+
 
 # Lazy initialization helpers
 _metrics_adapter = None
@@ -172,15 +185,14 @@ async def get_overview() -> dict:
 
         net_snapshot = metrics_adapter.get_network_snapshot()
         adapters = net_snapshot.get("adapters", [])
-        wifi = net_snapshot.get("wifi")
-        public_ip = net_snapshot.get("public_ip")
 
-        connection_status = "disconnected"
-        if gateway_sample and gateway_sample.status == "success":
-            if primary_sample and primary_sample.status == "success":
-                connection_status = "connected"
-            else:
-                connection_status = "degraded"
+        connection_status = (
+            "connected"
+            if gateway_sample and gateway_sample.status == "success" and primary_sample and primary_sample.status == "success"
+            else "degraded"
+            if gateway_sample and gateway_sample.status == "success"
+            else "disconnected"
+        )
 
         recent_incidents = []
 
@@ -297,12 +309,8 @@ async def get_quality_history(
     """Historical quality samples with optional bucket aggregation."""
     try:
         quality_repo = _get_quality_repo()
-        valid_ranges = ["5m", "1h", "6h", "24h", "7d", "30d"]
-        if range not in valid_ranges:
-            raise HTTPException(status_code=422, detail=f"Invalid range. Must be one of: {valid_ranges}")
-
-        range_seconds = {"5m": 300, "1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800, "30d": 2592000}
-        since = time.time() - range_seconds[range]
+        range_seconds = _validate_range(range)
+        since = time.time() - range_seconds
 
         samples = quality_repo.query_range(target_id, since, limit=10000)
 
@@ -366,8 +374,6 @@ async def get_quality_status(
     """Aggregated quality status with evidence."""
     try:
         analyzer = _get_quality_analyzer()
-        range_seconds = {"5m": 300, "1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800, "30d": 2592000}
-        since = time.time() - range_seconds[range]
 
         analyses = analyzer.analyze_all_targets(range_key=range)
         overall = analyzer.get_overall_status(analyses)
@@ -419,12 +425,8 @@ async def get_tcp_stats(
     """Current TCP statistics and history."""
     try:
         tcp_repo = _get_tcp_stats_repo()
-        valid_ranges = ["5m", "1h", "6h", "24h", "7d", "30d"]
-        if range not in valid_ranges:
-            raise HTTPException(status_code=422, detail=f"Invalid range. Must be one of: {valid_ranges}")
-
-        range_seconds = {"5m": 300, "1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800, "30d": 2592000}
-        since = time.time() - range_seconds[range]
+        range_seconds = _validate_range(range)
+        since = time.time() - range_seconds
 
         latest = tcp_repo.get_latest()
         samples = tcp_repo.query_range(since, limit=1000)
@@ -521,12 +523,8 @@ async def get_interface_history(
     """Per-interface history."""
     try:
         interface_repo = _get_interface_repo()
-        valid_ranges = ["5m", "1h", "6h", "24h", "7d", "30d"]
-        if range not in valid_ranges:
-            raise HTTPException(status_code=422, detail=f"Invalid range. Must be one of: {valid_ranges}")
-
-        range_seconds = {"5m": 300, "1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800, "30d": 2592000}
-        since = time.time() - range_seconds[range]
+        range_seconds = _validate_range(range)
+        since = time.time() - range_seconds
 
         samples = interface_repo.query_range(interface_id, since, limit=1000)
 

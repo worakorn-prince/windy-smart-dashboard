@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from typing import Any
@@ -134,6 +135,3 @@ class InterfaceCollector:
             "consecutive_failures": self._consecutive_failures,
             "tracked_interfaces": list(self._prev_counters.keys()),
         }
-
-
-import contextlib

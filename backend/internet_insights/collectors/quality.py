@@ -194,7 +194,7 @@ class QualityCollector:
             return None
 
         try:
-            reader, writer = await asyncio.wait_for(
+            _reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(addr, port),
                 timeout=timeout,
             )

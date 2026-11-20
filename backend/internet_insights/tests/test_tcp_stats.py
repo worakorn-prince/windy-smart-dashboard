@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -205,6 +206,3 @@ class TestTcpStatsRepository:
         remaining = tcp_repo.query_range(0, now, limit=10)
         assert len(remaining) == 1
         assert remaining[0].ts > cutoff
-
-
-import time
