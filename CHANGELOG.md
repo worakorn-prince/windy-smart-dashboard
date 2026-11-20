@@ -35,8 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `APP_VERSION`, the maintenance `MODULE_VERSION`, `frontend/package.json` and
   `frontend/package-lock.json` bumped to `0.6.3`.
-- The new Insights E2E smoke test waits up to 30 s for its first chart: cold analytics compute
-  under load legitimately exceeds the default 10 s assertion window (idle compute is ~1.3 s).
+- The new Insights E2E smoke test waits up to 60 s for its first chart: cold analytics compute
+  under load on Windows CI runners legitimately exceeds the default 10 s assertion window (idle
+  compute is ~1.3 s; cold compute on CI can take 30–50 s).
 
 ## [0.6.2] - 2026-11-19
 

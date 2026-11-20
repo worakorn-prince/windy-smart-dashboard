@@ -148,6 +148,18 @@ Open **http://127.0.0.1:8000** in your browser.
   into separate tabs instead of one crowded chart
 - **Collapsible cards** — every card can be expanded/collapsed to save space
 - **Sticky alerts** — active threshold breaches stay pinned at the top
+
+### Insights (`/insights`)
+- **Trend charts** with per-hour baseline bands (mean ± 3·std per hour of
+  day, flat fallback when history is short) over 24 h / 7 d / 30 d ranges;
+  axis shows the *effective window* actually covered by `samples` (retention
+  ~10 h)
+- **Disk growth per mount** (C:\, D:\, F:\, etc.) with first/last/avg/peak/delta
+- **Top processes** by average CPU with peak memory, grouped by name
+- **Maintenance summary** — action counts, success rate (shows `—` when no data)
+- **Security summary** — event counts by kind + top source IPs
+- **Ongoing anomaly detection** — |z| ≥ 3 sustained for 3 consecutive samples
+  (active-only: a cleared episode disappears from the list)
   while they last, plus the in-app toast stack
 - **Sensor-aware fallback** — cards render by sensor status; missing
   readings (e.g. iGPU load, RAM temperature on boards without those
@@ -221,71 +233,80 @@ Notes:
 ```
 Dashboard/
 ├── backend/
-│   ├── main.py              FastAPI app, WebSocket endpoints, routes
-│   ├── config.py            Settings + intervals
-│   ├── metrics.py           psutil-based system metrics
-│   ├── history.py           SQLite metrics history (sampler + queries)
-│   ├── alerts.py            Threshold alerts + rules store + Windows Toast
-│   ├── process_history.py   Per-process CPU/RAM samples (`process_samples`)
-│   ├── disk_health.py       SMART (`Get-PhysicalDisk`) + disk_samples + forecast
-│   ├── reports.py           Self-contained HTML daily/weekly report generator
-│   ├── sensors_lhm.py       LibreHardwareMonitorLib interop (temps/power)
-│   ├── speedtest_worker.py  On-demand Internet speed test
-│   ├── maintenance/         Maintenance module (guards, error codes,
-│   │                        PowerShell runner, scanner/system caches,
-│   │                        actions, cleaner, history, export, relaunch, router)
-│   ├── tests/               pytest suite (alerts/rules, history, parsers,
-│   │                        maintenance, security events, process drilldown,
-│   │                        relaunch, disk health, reports, retention, WS contract)
+│   ├── main.py                   FastAPI app, WebSocket endpoints, routes
+│   ├── config.py                 Settings + intervals
+│   ├── metrics.py                psutil-based system metrics
+│   ├── history.py                SQLite metrics history (sampler + queries)
+│   ├── alerts.py                 Threshold alerts + rules store + Windows Toast
+│   ├── process_history.py        Per-process CPU/RAM samples (`process_samples`)
+│   ├── disk_health.py            SMART (`Get-PhysicalDisk`) + disk_samples + forecast
+│   ├── reports.py                Self-contained HTML daily/weekly report generator
+│   ├── sensors_lhm.py            LibreHardwareMonitorLib interop (temps/power)
+│   ├── speedtest_worker.py       On-demand Internet speed test
+│   ├── insights.py               Baseline profiles + anomaly detection (z-score)
+│   ├── insights_overview.py      Aggregated /insights payload (5 history tables)
+│   ├── maintenance/              Maintenance module (guards, error codes,
+│   │                             PowerShell runner, scanner/system caches,
+│   │                             actions, cleaner, history, export, relaunch, router)
+│   ├── tests/                    pytest suite (alerts/rules, history, parsers,
+│   │                             maintenance, security events, process drilldown,
+│   │                             relaunch, disk health, reports, retention, WS contract,
+│   │                             insights anomaly, insights endpoint)
 │   ├── requirements.txt
 │   ├── security/
-│   │   ├── audit.py         On-demand audit + finding rules
-│   │   ├── monitor.py       Async background pollers → WS events
-│   │   ├── actions.py       Kill process / block IP / list rules
-│   │   ├── persistence.py   SQLite `security_events` history
-│   │   ├── findings.py      Finding + risk-score classes
-│   │   ├── geoip.py         ip-api.com lookup + Tor exit list
-│   │   └── winapi.py        PowerShell wrappers (Defender, logins, etc.)
+│   │   ├── audit.py              On-demand audit + finding rules
+│   │   ├── monitor.py            Async background pollers → WS events
+│   │   ├── actions.py            Kill process / block IP / list rules
+│   │   ├── persistence.py        SQLite `security_events` history
+│   │   ├── findings.py           Finding + risk-score classes
+│   │   ├── geoip.py              ip-api.com lookup + Tor exit list
+│   │   └── winapi.py             PowerShell wrappers (Defender, logins, etc.)
 │   ├── exporters/
-│   │   └── __init__.py      PDF / HTML / JSON report writers
-│   └── .cache/              geoip cache, tor exits, alert_rules.json
-├── reports/                 Generated self-contained HTML reports
-├── scripts/                 Agent-log viewer tooling (see README-viewer.md):
-│   ├── watch.py             live tail rebuild loop (`?auto=1` LIVE badge)
-│   ├── compare.py           base vs candidate run comparison (exit 1 on regression)
-│   ├── cost.py              token/cost per model (+ `--budget` gate)
-│   └── retention.py         archive/prune old JSONL rows
+│   │   └── __init__.py           PDF / HTML / JSON report writers
+│   └── .cache/                   geoip cache, tor exits, alert_rules.json, history.db
+├── reports/                      Generated self-contained HTML reports
+├── scripts/                      Agent-log viewer tooling (see README-viewer.md):
+│   ├── watch.py                  live tail rebuild loop (`?auto=1` LIVE badge)
+│   ├── compare.py                base vs candidate run comparison (exit 1 on regression)
+│   ├── cost.py                   token/cost per model (+ `--budget` gate)
+│   └── retention.py              archive/prune old JSONL rows
 └── frontend/
     ├── package.json
-    ├── vite.config.ts       proxy /api and /ws → 127.0.0.1:8000
-    ├── vitest.config.ts     unit-test config
+    ├── vite.config.ts            proxy /api and /ws → 127.0.0.1:8000
+    ├── vitest.config.ts          unit-test config
     ├── tsconfig.json
-    ├── tests/               vitest suites (format, security store, settings)
+    ├── tests/                    vitest suites (format, security store, settings,
+    │                             insights utils, insights store, insights cards, trends card)
     └── src/
-        ├── main.ts          App bootstrap + router
-        ├── App.vue          Layout + global styles
+        ├── main.ts               App bootstrap + router
+        ├── App.vue               Layout + global styles
         ├── pages/
         │   ├── Dashboard.vue
         │   ├── Security.vue
-        │   └── Maintenance.vue
+        │   ├── Maintenance.vue
+        │   └── Insights.vue
         ├── components/
-        │   ├── dashboard/   CpuCard, RamCard, DiskCard, NetworkCard,
-        │   │                 GpuCard, AdaptersCard, HistoryCard,
-        │   │                 ProcessesCard, ProcessDetailPanel,
-        │   │                 SystemCard, SpeedtestCard, PowerCard,
-        │   │                 AlertsCard, AlertRulesCard, HealthStrip
-        │   ├── security/    AuditCard, PortsCard, ConnectionsCard,
-        │   │                 DefenderCard, FailedLoginsCard,
-        │   │                 LiveEventsLog, SecurityEventsLog,
-        │   │                 SettingsPanel, BlockedRulesCard
-        │   └── maintenance/ MaintenanceTable, MaintenancePanel,
-        │                     MaintenanceHistory, MaintenanceAdminBanner,
-        │                     DiskHealthCard, ReportsCard
-        ├── composables/      useWebSocket, format helpers
-        ├── directives/       autoTip (hover tooltips on clipped text)
-        ├── utils/            format.ts (bytes / duration / percent)
-        └── stores/          metrics.ts, history.ts, security.ts,
-                              maintenance.ts (Pinia)
+        │   ├── dashboard/        CpuCard, RamCard, DiskCard, NetworkCard,
+        │   │                     GpuCard, AdaptersCard, HistoryCard,
+        │   │                     ProcessesCard, ProcessDetailPanel,
+        │   │                     SystemCard, SpeedtestCard, PowerCard,
+        │   │                     AlertsCard, AlertRulesCard, HealthStrip
+        │   ├── security/         AuditCard, PortsCard, ConnectionsCard,
+        │   │                     DefenderCard, FailedLoginsCard,
+        │   │                     LiveEventsLog, SecurityEventsLog,
+        │   │                     SettingsPanel, BlockedRulesCard
+        │   ├── maintenance/      MaintenanceTable, MaintenancePanel,
+        │                         MaintenanceHistory, MaintenanceAdminBanner,
+        │                         DiskHealthCard, ReportsCard
+        │   └── insights/         TrendsCard, DiskGrowthCard, TopProcessesCard,
+        │                         MaintenanceSummaryCard, SecuritySummaryCard,
+        │                         AnomaliesCard, InsightsCardShell, InsightsRangeTabs
+        ├── composables/          useWebSocket, format helpers
+        ├── directives/           autoTip (hover tooltips on clipped text)
+        ├── utils/                format.ts (bytes / duration / percent),
+        │                         insights.ts (epoch/ISO parsing, formatters)
+        └── stores/               metrics.ts, history.ts, security.ts,
+                                  maintenance.ts, insights.ts (Pinia)
 ```
 
 ---
