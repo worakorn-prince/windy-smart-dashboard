@@ -161,9 +161,9 @@ test.describe('Insights page', () => {
     const trends = page.getByTestId('insights-trends')
     await expect(trends).toBeVisible()
     // Insights cold start (first vite compile + backend compute under load) can
-    // exceed the 10s default expect timeout; wait up to 30s for the data-driven
+    // exceed the default expect timeout; wait up to 60s for the data-driven
     // canvas like the drag test waits for the processes row.
-    await expect(trends.locator('canvas').first()).toBeVisible({ timeout: 30_000 })
+    await expect(trends.locator('canvas').first()).toBeVisible({ timeout: 60_000 })
     await expect(page.getByTestId('insights-window-note')).toContainText(/samples/)
 
     await expect(page.getByTestId('insights-disk')).toBeVisible()
