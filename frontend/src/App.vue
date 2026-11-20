@@ -56,6 +56,11 @@ store.connect()
         </RouterLink>
       </nav>
 
+      <nav class="side-nav-extra" data-testid="side-nav-insights-group">
+        <p class="nav-group">ANALYTICS</p>
+        <RouterLink to="/insights" exact-active-class="is-active" data-testid="side-nav-insights">Insights</RouterLink>
+      </nav>
+
       <div class="device-card" data-testid="device-card">
         <span class="device-dot" aria-hidden="true"></span>
         <div>
@@ -153,7 +158,8 @@ store.connect()
 }
 
 .side-nav,
-.side-nav-system {
+.side-nav-system,
+.side-nav-extra {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -169,7 +175,8 @@ store.connect()
 }
 
 .side-nav a,
-.side-nav-system a {
+.side-nav-system a,
+.side-nav-extra a {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -183,7 +190,8 @@ store.connect()
 }
 
 .side-nav a:hover,
-.side-nav-system a:hover {
+.side-nav-system a:hover,
+.side-nav-extra a:hover {
   background: var(--accent-soft);
   color: var(--text);
 }
@@ -332,12 +340,14 @@ store.connect()
   }
 
   .side-nav,
-  .side-nav-system {
+  .side-nav-system,
+  .side-nav-extra {
     width: 100%;
   }
 
   .side-nav a,
-  .side-nav-system a {
+  .side-nav-system a,
+  .side-nav-extra a {
     justify-content: center;
     padding: 10px 8px;
     font-size: 12px;

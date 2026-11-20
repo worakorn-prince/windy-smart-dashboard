@@ -288,6 +288,18 @@ async def lifespan(app: FastAPI):
                                           suspicious=list(suspicious_countries_state))
     await sec_mon.start()
 
+    async def _prewarm_insights() -> None:
+        results = await asyncio.gather(
+            *(_insights_caches[rng].get(refresh_if_stale=True) for rng in INSIGHT_RANGES),
+            return_exceptions=True,
+        )
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error("insights cache pre-warm failed: %s", result)
+
+    # Fire-and-forget: /api/insights cold compute must never slow startup.
+    insights_prewarm_task = asyncio.create_task(_prewarm_insights())
+
     prewarm_results = await asyncio.gather(
         _processes_snapshot_cache.get(refresh_if_stale=True),
         _system_snapshot_cache.get(refresh_if_stale=True),
@@ -308,7 +320,8 @@ async def lifespan(app: FastAPI):
     finally:
         if sec_mon:
             await sec_mon.stop()
-        for t in (metrics_task, process_task, uptime_task, history_task, report_task, audit_task):
+        for t in (metrics_task, process_task, uptime_task, history_task, report_task, audit_task,
+                  insights_prewarm_task):
             t.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await t

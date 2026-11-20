@@ -150,6 +150,30 @@ test.describe('Security and maintenance pages', () => {
   })
 })
 
+test.describe('Insights page', () => {
+  test('/insights shows sidebar entry and summary cards with real data', async ({ page }) => {
+    await page.goto('/insights')
+
+    await expect(page.getByTestId('side-nav-insights')).toBeVisible()
+    await expect(page.getByTestId('insights-head')).toBeVisible()
+    await expect(page.getByTestId('insights-range-tabs')).toBeVisible()
+
+    const trends = page.getByTestId('insights-trends')
+    await expect(trends).toBeVisible()
+    // Insights cold start (first vite compile + backend compute under load) can
+    // exceed the 10s default expect timeout; wait up to 30s for the data-driven
+    // canvas like the drag test waits for the processes row.
+    await expect(trends.locator('canvas').first()).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId('insights-window-note')).toContainText(/samples/)
+
+    await expect(page.getByTestId('insights-disk')).toBeVisible()
+    await expect(page.getByTestId('insights-disk').locator('tbody tr').first()).toBeVisible()
+
+    await expect(page.getByTestId('insights-processes')).toBeVisible()
+    await expect(page.getByTestId('insights-processes').locator('tbody tr').first()).toBeVisible()
+  })
+})
+
 test.describe('Card drag & drop', () => {
   test('dragging a card onto another swaps their positions and persists across reload', async ({ page }) => {
     // Cards grow once live metrics arrive; a fixed viewport can push the drop target
