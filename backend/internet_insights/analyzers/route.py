@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import time
@@ -10,10 +11,8 @@ from typing import Any
 
 from ..config import get_config
 from ..storage.repositories import (
-    DiagnosticSessionRepository,
     DiagnosticResultRepository,
-    DiagnosticSession,
-    DiagnosticResult,
+    DiagnosticSessionRepository,
 )
 
 logger = logging.getLogger("dashboard.internet_insights.analyzers.route")
@@ -81,10 +80,8 @@ class RouteAnalyzer:
                 routes = []
                 for r in results:
                     if r.result_type == "route":
-                        try:
+                        with contextlib.suppress(Exception):
                             routes.append(json.loads(r.payload_json))
-                        except Exception:
-                            pass
                 if routes:
                     route_snapshots.append({
                         "timestamp": session.started_at,
@@ -242,17 +239,13 @@ class RouteAnalyzer:
 
         for r in baseline_results:
             if r.result_type == "hop":
-                try:
+                with contextlib.suppress(Exception):
                     baseline_hops.append(json.loads(r.payload_json))
-                except Exception:
-                    pass
 
         for r in current_results:
             if r.result_type == "hop":
-                try:
+                with contextlib.suppress(Exception):
                     current_hops.append(json.loads(r.payload_json))
-                except Exception:
-                    pass
 
         # Compare paths
         changed = False
@@ -303,10 +296,8 @@ class RouteAnalyzer:
                 hops = []
                 for r in results:
                     if r.result_type == "hop":
-                        try:
+                        with contextlib.suppress(Exception):
                             hops.append(json.loads(r.payload_json))
-                        except Exception:
-                            pass
                 if hops:
                     traceroutes.append({
                         "timestamp": session.started_at,

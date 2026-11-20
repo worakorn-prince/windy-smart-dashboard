@@ -16,7 +16,7 @@ from .tcp_stats import TcpStatsCollector as TcpStatsCollector
 from .dns import DnsCollector as DnsCollector
 from .route import RouteCollector as RouteCollector
 
-__all__ = ["Collector", "CollectorConfig", "InterfaceCollector", "QualityCollector", "TcpStatsCollector", "DnsCollector", "RouteCollector"]
+__all__ = ["Collector", "CollectorConfig", "DnsCollector", "InterfaceCollector", "QualityCollector", "RouteCollector", "TcpStatsCollector"]
 
 logger = logging.getLogger("dashboard.internet_insights.collectors")
 

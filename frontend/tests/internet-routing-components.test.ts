@@ -2,28 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
-// Polyfills for jsdom
-vi.hoisted(() => {
-  Object.defineProperty(globalThis, 'matchMedia', {
-    value: vi.fn().mockImplementation(query => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    })),
-    writable: true,
-  })
-  globalThis.ResizeObserver = vi.fn().mockImplementation(() => ({
-    observe: vi.fn(),
-    unobserve: vi.fn(),
-    disconnect: vi.fn(),
-  }))
-})
-
 import RouteTable from '@/components/internet/RouteTable.vue'
 import TracerouteView from '@/components/internet/TracerouteView.vue'
 import RouteHistoryChart from '@/components/internet/RouteHistoryChart.vue'
@@ -412,10 +390,11 @@ describe('InternetRouting page', () => {
 
   it('runs traceroute when button clicked', async () => {
     const store = useInternetStore()
-    vi.spyOn(store, 'loadTraceroute').mockResolvedValue(undefined)
+    const spy = vi.spyOn(store, 'loadTraceroute').mockResolvedValue(undefined)
     const wrapper = mount(InternetRouting)
     await wrapper.find('[data-testid="traceroute-run-btn"]').trigger('click')
-    expect(wrapper.findComponent(TracerouteView).emitted('run')).toBeTruthy()
+    expect(wrapper.exists()).toBe(true)
+    expect(spy).toHaveBeenCalledWith('8.8.8.8', 30, 'icmp')
   })
 
   it('shows loading state', () => {

@@ -140,7 +140,7 @@ class RouteCollector:
         if routes:
             _, session_repo, result_repo = self._get_repos()
             session_id = generate_session_id()
-            session = await asyncio.to_thread(
+            await asyncio.to_thread(
                 session_repo.create,
                 type('DiagnosticSession', (), {
                     'id': session_id,
@@ -183,7 +183,6 @@ class RouteCollector:
 
     def _get_psutil_routes(self) -> list[RouteEntry]:
         """Get route table via psutil (cross-platform fallback)."""
-        import psutil
         routes = []
         try:
             # psutil.net_if_stats() doesn't provide routing table
@@ -297,7 +296,6 @@ class RouteCollector:
 
     def _traceroute_windows(self, target: str, max_hops: int, timeout_ms: int, protocol: str) -> list[TracerouteHop]:
         """Windows traceroute using ICMP (tracert-style) or UDP."""
-        hops = []
         try:
             # Resolve target
             dest_ip = socket.gethostbyname(target)
@@ -334,14 +332,14 @@ class RouteCollector:
                 start = time.time()
                 try:
                     icmp_socket.sendto(header, (dest_ip, 0))
-                    data, addr = icmp_socket.recvfrom(1024)
+                    _data, addr = icmp_socket.recvfrom(1024)
                     rtt_ms = round((time.time() - start) * 1000, 1)
                     hops.append(TracerouteHop(hop=ttl, address=addr[0], rtt_ms=rtt_ms, status="success"))
 
                     # Check if we reached destination
                     if addr[0] == dest_ip:
                         break
-                except socket.timeout:
+                except TimeoutError:
                     hops.append(TracerouteHop(hop=ttl, address=None, rtt_ms=None, status="timeout"))
                 except Exception:
                     hops.append(TracerouteHop(hop=ttl, address=None, rtt_ms=None, status="error"))
@@ -370,14 +368,14 @@ class RouteCollector:
                 start = time.time()
                 try:
                     sock.sendto(b"traceroute", (dest_ip, port))
-                    data, addr = sock.recvfrom(1024)
+                    _data, addr = sock.recvfrom(1024)
                     rtt_ms = round((time.time() - start) * 1000, 1)
                     hops.append(TracerouteHop(hop=ttl, address=addr[0], rtt_ms=rtt_ms, status="success"))
 
                     if addr[0] == dest_ip:
                         sock.close()
                         break
-                except socket.timeout:
+                except TimeoutError:
                     hops.append(TracerouteHop(hop=ttl, address=None, rtt_ms=None, status="timeout"))
                 except ConnectionRefusedError:
                     # Destination reached (port unreachable)
@@ -404,7 +402,7 @@ class RouteCollector:
         """Calculate ICMP checksum."""
         if len(data) % 2:
             data += b'\x00'
-        s = sum(struct.unpack("!%dH" % (len(data) // 2), data))
+        s = sum(struct.unpack(f"!{len(data) // 2}H", data))
         s = (s >> 16) + (s & 0xFFFF)
         s += s >> 16
         return ~s & 0xFFFF

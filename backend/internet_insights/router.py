@@ -174,6 +174,13 @@ def _get_collector_manager():
     return _collector_manager
 
 
+def _require_collector(collector, name: str):
+    """Return the collector or raise a 503 when unavailable (kept out of try blocks)."""
+    if not collector:
+        raise HTTPException(status_code=503, detail=f"{name} collector not available")
+    return collector
+
+
 def _common_metadata(source: str = "collector", status: str = "ok", errors: list[str] | None = None, coverage: float = 1.0) -> dict:
     """Generate common response metadata."""
     now = time.time()
@@ -630,7 +637,6 @@ async def get_dns() -> dict:
     try:
         dns_repo = _get_dns_probe_repo()
         metrics_adapter = _get_metrics_adapter()
-        dns_analyzer = _get_dns_analyzer()
 
         # Get configured resolvers from adapters
         snapshot = metrics_adapter.get_network_snapshot()
@@ -646,7 +652,6 @@ async def get_dns() -> dict:
             latest = dns_repo.query_range(resolver, time.time() - 300, limit=10)
             if latest:
                 successful = [s for s in latest if s.status == "success" and s.duration_ms is not None]
-                timeouts = sum(1 for s in latest if s.status == "timeout")
                 total = len(latest)
                 avg_latency = statistics.mean([s.duration_ms for s in successful]) if successful else None
                 success_rate = (len(successful) / total * 100) if total > 0 else 0
@@ -689,7 +694,6 @@ async def get_dns_history(
 ) -> dict:
     """DNS probe history with optional filters."""
     try:
-        import statistics
         dns_repo = _get_dns_probe_repo()
         range_seconds = _validate_range(range)
         since = time.time() - range_seconds
@@ -844,11 +848,8 @@ async def post_traceroute(
     """On-demand traceroute to target."""
     try:
         collector_manager = _get_collector_manager()
-        route_collector = collector_manager.get_collector("route")
+        route_collector = _require_collector(collector_manager.get_collector("route"), "Route")
         traceroute_repo = _get_traceroute_repo()
-
-        if not route_collector:
-            raise HTTPException(status_code=503, detail="Route collector not available")
 
         # Create diagnostic session
         from ..storage.repositories import DiagnosticSessionRepository, DiagnosticResultRepository, generate_session_id

@@ -32,7 +32,7 @@ jobs:
         run: ruff check .
 
       - name: Run backend tests
-        run: python -m pytest backend/tests -q
+        run: python -m pytest backend/tests backend/internet_insights/tests -q
 
   viewer-tests:
     name: Viewer logging tests (Ubuntu)

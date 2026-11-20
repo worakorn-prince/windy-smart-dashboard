@@ -190,7 +190,7 @@ class DnsCollector:
                 return await self._probe_direct_udp(target, timeout)
             else:
                 return None, "error", 0, "UNKNOWN_METHOD"
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return None, "timeout", 0, "TIMEOUT"
         except socket.gaierror as e:
             return None, "error", 0, f"GAI_ERROR_{e.errno}"
@@ -202,6 +202,7 @@ class DnsCollector:
     async def _probe_system_resolver(self, target: DnsProbeTarget, timeout: float) -> tuple[float | None, str, int, str | None]:
         """Probe using system resolver (getaddrinfo)."""
         loop = asyncio.get_event_loop()
+        start = loop.time()
         try:
             # getaddrinfo supports both A and AAAA via family hints
             family = socket.AF_INET if target.record_type == "A" else socket.AF_INET6
@@ -219,8 +220,6 @@ class DnsCollector:
                 return None, "timeout", 0, "TIMEOUT"
             else:
                 return None, "servfail", 0, "SERVFAIL"
-        except Exception as e:
-            raise
 
     async def _probe_direct_udp(self, target: DnsProbeTarget, timeout: float) -> tuple[float | None, str, int, str | None]:
         """Probe using direct UDP to resolver (simplified implementation)."""
@@ -229,6 +228,7 @@ class DnsCollector:
         # Here we use getaddrinfo with the resolver as the target to simulate
         # For true direct UDP, we'd need to implement DNS protocol
         loop = asyncio.get_event_loop()
+        start = loop.time()
         try:
             # Use socket.getaddrinfo with resolver IP as nameserver is not directly supported
             # We simulate by doing a query and measuring time
@@ -249,8 +249,6 @@ class DnsCollector:
                 return None, "timeout", 0, "TIMEOUT"
             else:
                 return None, "servfail", 0, "SERVFAIL"
-        except Exception as e:
-            raise
 
     async def compare_resolvers(self, hostname: str, record_type: str = "A") -> list[dict[str, Any]]:
         """On-demand resolver comparison for a hostname."""
@@ -269,7 +267,6 @@ class DnsCollector:
         results = await asyncio.gather(*probe_tasks, return_exceptions=True)
 
         comparison = []
-        ts = time.time()
         for i, result in enumerate(results):
             target = probe_targets[i]
             if isinstance(result, Exception):
