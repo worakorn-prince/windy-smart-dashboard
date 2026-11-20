@@ -1,15 +1,20 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import uPlot from 'uplot'
+import 'uplot/dist/uPlot.min.css'
 import { useInternetStore } from '@/stores/internet'
 import StatTile from '@/components/dashboard/StatTile.vue'
+import type { HistoryPoint, BucketedLatencyPoint } from '@/stores/internet'
 
 const store = useInternetStore()
 
 const props = defineProps<{
   targetId?: 'primary' | 'secondary' | 'gateway'
+  showSparkline?: boolean
 }>()
 
 const targetId = computed(() => props.targetId ?? 'primary')
+const showSparkline = computed(() => props.showSparkline ?? true)
 
 const target = computed(() => {
   if (!store.quality?.targets) return null
@@ -51,6 +56,129 @@ const lossClass = computed(() => {
   return 'cyan'
 })
 
+// Sparkline
+const sparklineEl = ref<HTMLElement | null>(null)
+let sparklineUplot: uPlot | null = null
+let sparklineResizeObs: ResizeObserver | null = null
+let sparklineThemeObserver: MutationObserver | null = null
+
+const historyPoints = computed<((HistoryPoint | BucketedLatencyPoint) & { target_id?: string })[]>(() =>
+  store.qualityHistory?.points?.filter(p => (p as any).target_id === targetId.value) ?? []
+)
+
+const sparklineReady = computed(() => historyPoints.value.length > 0)
+
+function buildSparklineData(): uPlot.AlignedData {
+  const pts = historyPoints.value
+  if (!pts.length) return [[], []]
+
+  const x: number[] = pts.map(p => p.ts * 1000)
+  let y: (number | null)[]
+
+  if (pts.length > 0 && 'latency' in pts[0]!) {
+    // Bucketed data - use median
+    y = pts.map(p => (p as BucketedLatencyPoint).latency.median)
+  } else {
+    // Raw data - use rtt_ms
+    y = pts.map(p => (p as HistoryPoint).rtt_ms)
+  }
+
+  return [x, y]
+}
+
+function renderSparkline() {
+  if (!sparklineEl.value || !sparklineReady.value) return
+
+  const css = getComputedStyle(document.documentElement)
+  const cGrid = css.getPropertyValue('--grid-line').trim() || '#16203a'
+  const cMuted = css.getPropertyValue('--muted').trim() || '#64748b'
+
+  const statusColor = statusClass.value === 'text-good' ? '#4ade80'
+    : statusClass.value === 'text-warn' ? '#fbbf24'
+    : statusClass.value === 'text-bad' ? '#f87171'
+    : '#64748b'
+
+  const axisStyle = {
+    stroke: 'transparent',
+    grid: { stroke: 'transparent', width: 0 },
+    ticks: { stroke: 'transparent', width: 0 },
+    font: '10px ui-monospace, monospace',
+  }
+
+  const opts: uPlot.Options = {
+    width: sparklineEl.value.clientWidth || 180,
+    height: 40,
+    series: [
+      {},
+      {
+        label: 'Latency',
+        stroke: statusColor,
+        width: 1.5,
+        fill: (u: uPlot): CanvasGradient => {
+          const grad = u.ctx.createLinearGradient(0, u.bbox.top, 0, u.bbox.top + u.bbox.height)
+          grad.addColorStop(0, hexToRgba(statusColor, 0.18))
+          grad.addColorStop(1, hexToRgba(statusColor, 0))
+          return grad
+        },
+        scale: 'ms',
+        spanGaps: true,
+        value: () => '',
+      },
+    ],
+    axes: [
+      { scale: 'x', ...axisStyle, show: false },
+      { scale: 'ms', ...axisStyle, show: false },
+    ],
+    scales: {
+      x: { time: true },
+      ms: { auto: true },
+    },
+    legend: { show: false },
+    cursor: { show: false },
+  }
+
+  if (sparklineUplot) {
+    sparklineUplot.destroy()
+    sparklineUplot = null
+  }
+  sparklineUplot = new uPlot(opts, buildSparklineData(), sparklineEl.value)
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const raw = hex.replace('#', '')
+  const full = raw.length === 3 ? raw.split('').map(c => c + c).join('') : raw.padEnd(6, '0').slice(0, 6)
+  const r = parseInt(full.slice(0, 2), 16) || 0
+  const g = parseInt(full.slice(2, 4), 16) || 0
+  const b = parseInt(full.slice(4, 6), 16) || 0
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+function scheduleSparklineRender() {
+  if (!sparklineEl.value) return
+  renderSparkline()
+}
+
+onMounted(() => {
+  if (!showSparkline.value) return
+  sparklineThemeObserver = new MutationObserver(() => scheduleSparklineRender())
+  sparklineThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+  sparklineResizeObs = new ResizeObserver(() => {
+    if (sparklineUplot && sparklineEl.value) {
+      sparklineUplot.setSize({ width: sparklineEl.value.clientWidth || 180, height: 40 })
+    }
+  })
+  if (sparklineEl.value) sparklineResizeObs.observe(sparklineEl.value)
+  scheduleSparklineRender()
+})
+
+watch([historyPoints, () => store.qualityHistory?.step], () => scheduleSparklineRender(), { flush: 'post' })
+
+onBeforeUnmount(() => {
+  if (sparklineThemeObserver) sparklineThemeObserver.disconnect()
+  if (sparklineResizeObs) sparklineResizeObs.disconnect()
+  if (sparklineUplot) sparklineUplot.destroy()
+})
+
 function formatTimeAgo(ts: number): string {
   if (!ts) return '—'
   const diff = (Date.now() - ts * 1000) / 1000
@@ -77,6 +205,8 @@ function formatTimeAgo(ts: number): string {
         Probe: {{ formatTimeAgo(lastProbe) }}
       </span>
     </header>
+
+    <div v-if="hasData && showSparkline && sparklineReady" class="sparkline-container" ref="sparklineEl" data-testid="quality-sparkline"></div>
 
     <div v-if="hasData" class="quality-metrics" data-testid="quality-metrics-grid">
       <StatTile
@@ -164,7 +294,7 @@ function formatTimeAgo(ts: number): string {
   padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
 .quality-header {
@@ -215,6 +345,11 @@ function formatTimeAgo(ts: number): string {
   color: var(--muted);
   font-family: var(--font-mono);
   white-space: nowrap;
+}
+
+.sparkline-container {
+  height: 40px;
+  min-width: 0;
 }
 
 .quality-metrics {

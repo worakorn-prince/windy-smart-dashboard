@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import socket
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -11,6 +13,7 @@ from typing import Any
 from ..config import get_config
 from ..storage.repositories import QualitySample, QualitySampleRepository
 from ..adapters.ping_adapter import PingAdapter
+from ..adapters.metrics_adapter import MetricsAdapter
 
 logger = logging.getLogger("dashboard.internet_insights.collectors.quality")
 
@@ -21,6 +24,7 @@ class ProbeTarget:
     address: str
     probe_type: str
     interval_sec: float
+    port: int = 443
 
 
 class QualityCollector:
@@ -37,25 +41,27 @@ class QualityCollector:
         self._consecutive_failures = 0
         self._run_lock = asyncio.Lock()
 
-        # Define probe targets
         self.targets = [
             ProbeTarget(
                 target_id="gateway",
-                address=self._get_gateway(),
+                address=self._resolve_gateway(),
                 probe_type="tcp",
                 interval_sec=self.config.quality_gateway_interval,
+                port=443,
             ),
             ProbeTarget(
                 target_id="primary",
                 address=self.config.primary_target,
                 probe_type="tcp",
                 interval_sec=self.config.quality_primary_interval,
+                port=443,
             ),
             ProbeTarget(
                 target_id="secondary",
                 address=self.config.secondary_target,
                 probe_type="tcp",
                 interval_sec=self.config.quality_secondary_interval,
+                port=443,
             ),
         ]
         self._next_probe_time: dict[str, float] = {t.target_id: 0.0 for t in self.targets}
@@ -64,18 +70,18 @@ class QualityCollector:
     def name(self) -> str:
         return "quality"
 
-    def _get_gateway(self) -> str:
-        """Get default gateway from metrics adapter."""
+    def _resolve_gateway(self) -> str:
+        """Resolve gateway IP from active interface using MetricsAdapter."""
         try:
-            from ..adapters.metrics_adapter import MetricsAdapter
             adapter = MetricsAdapter()
             snapshot = adapter.get_network_snapshot()
             for gw in snapshot.get("gateways", []):
-                return gw
-            # Fallback to common gateway
-            return "192.168.1.1"
+                if gw:
+                    return gw
         except Exception:
-            return "192.168.1.1"
+            pass
+        # Fallback to common gateway
+        return "192.168.1.1"
 
     async def start(self) -> None:
         if self._running:
@@ -120,14 +126,15 @@ class QualityCollector:
             finally:
                 self._last_run_duration = time.monotonic() - start
 
-            # Sleep a short interval and check again
             await asyncio.sleep(1.0)
 
     async def _probe_target(self, target: ProbeTarget) -> None:
-        """Probe a single target and store the result."""
+        """Probe a single target using TCP connect and store the result."""
         timeout_sec = self.config.probe_timeout_ms / 1000.0
+        ts = time.time()
+
         try:
-            rtt_ms = await self.ping_adapter.ping(target.address, timeout=timeout_sec)
+            rtt_ms = await self._tcp_connect_probe(target.address, target.port, timeout_sec)
             if rtt_ms is not None:
                 status = "success"
                 error_code = None
@@ -135,9 +142,25 @@ class QualityCollector:
                 status = "timeout"
                 error_code = "TIMEOUT"
                 rtt_ms = None
+        except socket.gaierror:
+            status = "dns_failure"
+            error_code = "DNS_FAILURE"
+            rtt_ms = None
+        except ConnectionRefusedError:
+            status = "unreachable"
+            error_code = "CONNECTION_REFUSED"
+            rtt_ms = None
         except TimeoutError:
             status = "timeout"
             error_code = "TIMEOUT"
+            rtt_ms = None
+        except OSError as e:
+            if e.errno in (101, 113, 110):  # Network unreachable, no route, timeout
+                status = "unreachable"
+                error_code = "NETWORK_UNREACHABLE"
+            else:
+                status = "error"
+                error_code = f"OSERROR_{e.errno}"
             rtt_ms = None
         except Exception as e:
             status = "error"
@@ -145,7 +168,7 @@ class QualityCollector:
             rtt_ms = None
 
         sample = QualitySample(
-            ts=time.time(),
+            ts=ts,
             target_id=target.target_id,
             probe_type=target.probe_type,
             rtt_ms=rtt_ms,
@@ -155,18 +178,53 @@ class QualityCollector:
             interface_id=None,
         )
 
-        # Store in background to not block the loop
         await asyncio.to_thread(self.repository.insert, sample)
+
+    async def _tcp_connect_probe(self, host: str, port: int, timeout: float) -> float | None:
+        """TCP connect probe - returns RTT in ms or None on timeout/failure."""
+        loop = asyncio.get_event_loop()
+        start = loop.time()
+
+        try:
+            # Resolve hostname
+            addr = await self.ping_adapter._resolve_host(host)
+            if not addr:
+                return None
+        except socket.gaierror:
+            return None
+
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(addr, port),
+                timeout=timeout,
+            )
+            writer.close()
+            with contextlib.suppress(Exception):
+                await writer.wait_closed()
+            return round((loop.time() - start) * 1000, 1)
+        except (TimeoutError, ConnectionRefusedError, OSError):
+            elapsed = loop.time() - start
+            if elapsed < timeout:
+                return round(elapsed * 1000, 1)
+            return None
 
     def get_status(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "running": self._running,
-            "targets": [{"target_id": t.target_id, "address": t.address, "interval_sec": t.interval_sec} for t in self.targets],
+            "targets": [
+                {"target_id": t.target_id, "address": t.address, "interval_sec": t.interval_sec, "port": t.port}
+                for t in self.targets
+            ],
             "last_run_duration_sec": self._last_run_duration,
             "consecutive_failures": self._consecutive_failures,
         }
 
-
-# Import contextlib at top level for _run_loop
-import contextlib
+    async def refresh_gateway(self) -> None:
+        """Refresh gateway address from active interface."""
+        new_gateway = self._resolve_gateway()
+        for target in self.targets:
+            if target.target_id == "gateway":
+                target.address = new_gateway
+                logger.info("Gateway address updated to %s", new_gateway)
+                break

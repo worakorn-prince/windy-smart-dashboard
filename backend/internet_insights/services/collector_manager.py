@@ -8,9 +8,11 @@ from typing import Any
 from ..config import get_config
 from ..collectors.quality import QualityCollector
 from ..collectors.interface import InterfaceCollector
+from ..collectors.tcp_stats import TcpStatsCollector
 from ..storage.repositories import (
     QualitySampleRepository,
     InterfaceSampleRepository,
+    TcpStatsRepository,
 )
 
 logger = logging.getLogger("dashboard.internet_insights.services.collector_manager")
@@ -30,6 +32,7 @@ class CollectorManager:
         self._repositories = {
             "quality": QualitySampleRepository(),
             "interface": InterfaceSampleRepository(),
+            "tcp_stats": TcpStatsRepository(),
         }
 
     def _init_collectors(self) -> None:
@@ -37,6 +40,7 @@ class CollectorManager:
         self.collectors = {
             "quality": QualityCollector(repository=self._repositories["quality"]),
             "interface": InterfaceCollector(repository=self._repositories["interface"]),
+            "tcp_stats": TcpStatsCollector(repository=self._repositories["tcp_stats"]),
         }
 
     def initialize(self) -> None:

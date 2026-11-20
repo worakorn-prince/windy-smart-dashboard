@@ -259,7 +259,7 @@ describe('internet store — loadQualityHistory', () => {
     const store = useInternetStore()
     await store.loadQualityHistory()
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/internet/quality/history?range=1h&target_id=primary')
+    expect(fetchMock).toHaveBeenCalledWith('/api/internet/quality/history?range=1h&target_id=primary&step=60')
     expect(store.qualityHistory).toEqual(historyFixture)
   })
 
@@ -270,7 +270,7 @@ describe('internet store — loadQualityHistory', () => {
     const store = useInternetStore()
     await store.loadQualityHistory('24h', 'gateway')
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/internet/quality/history?range=24h&target_id=gateway')
+    expect(fetchMock).toHaveBeenCalledWith('/api/internet/quality/history?range=24h&target_id=gateway&step=60')
   })
 })
 

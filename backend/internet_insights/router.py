@@ -23,6 +23,8 @@ _net_cache_adapter = None
 _history_adapter = None
 _quality_repo = None
 _interface_repo = None
+_tcp_stats_repo = None
+_quality_analyzer = None
 _collector_manager = None
 
 
@@ -82,6 +84,22 @@ def _get_interface_repo():
     return _interface_repo
 
 
+def _get_tcp_stats_repo():
+    global _tcp_stats_repo
+    if _tcp_stats_repo is None:
+        from .storage.repositories import TcpStatsRepository
+        _tcp_stats_repo = TcpStatsRepository()
+    return _tcp_stats_repo
+
+
+def _get_quality_analyzer():
+    global _quality_analyzer
+    if _quality_analyzer is None:
+        from .analyzers.quality import QualityAnalyzer
+        _quality_analyzer = QualityAnalyzer()
+    return _quality_analyzer
+
+
 def _get_collector_manager():
     global _collector_manager
     if _collector_manager is None:
@@ -103,6 +121,29 @@ def _common_metadata(source: str = "collector", status: str = "ok", errors: list
     }
 
 
+def _bucket_samples(samples: list, step_seconds: int, value_fn, agg_fn) -> list:
+    """Bucket samples into time windows and aggregate."""
+    if not samples or step_seconds <= 0:
+        return []
+
+    buckets: dict[int, list] = {}
+    for s in samples:
+        bucket_ts = int(s.ts // step_seconds) * step_seconds
+        buckets.setdefault(bucket_ts, []).append(s)
+
+    result = []
+    for bucket_ts in sorted(buckets.keys()):
+        bucket_samples = buckets[bucket_ts]
+        values = [value_fn(s) for s in bucket_samples if value_fn(s) is not None]
+        if values:
+            result.append({
+                "ts": bucket_ts,
+                "value": agg_fn(values),
+                "count": len(values),
+            })
+    return result
+
+
 @router.get("/overview")
 async def get_overview() -> dict:
     """Summary health overview."""
@@ -111,12 +152,10 @@ async def get_overview() -> dict:
         interface_repo = _get_interface_repo()
         metrics_adapter = _get_metrics_adapter()
 
-        # Get current quality samples
         gateway_sample = quality_repo.get_latest("gateway")
         primary_sample = quality_repo.get_latest("primary")
         secondary_sample = quality_repo.get_latest("secondary")
 
-        # Get active interface
         latest_interfaces = interface_repo.get_all_latest()
         active_interface = None
         current_throughput = {"send_bps": 0, "recv_bps": 0, "interface_id": None}
@@ -131,13 +170,11 @@ async def get_overview() -> dict:
                 }
                 break
 
-        # Get network snapshot for additional info
         net_snapshot = metrics_adapter.get_network_snapshot()
         adapters = net_snapshot.get("adapters", [])
         wifi = net_snapshot.get("wifi")
         public_ip = net_snapshot.get("public_ip")
 
-        # Determine connection status
         connection_status = "disconnected"
         if gateway_sample and gateway_sample.status == "success":
             if primary_sample and primary_sample.status == "success":
@@ -145,10 +182,8 @@ async def get_overview() -> dict:
             else:
                 connection_status = "degraded"
 
-        # Get recent incidents (placeholder for now)
         recent_incidents = []
 
-        # DNS health from adapters
         dns_configured = []
         for adapter in adapters:
             dns_configured.extend(adapter.get("dns", []))
@@ -210,8 +245,7 @@ async def get_quality() -> dict:
         for target_id in targets:
             sample = quality_repo.get_latest(target_id)
             if sample:
-                # Get more samples for stats
-                since = time.time() - 300  # last 5 minutes
+                since = time.time() - 300
                 samples = quality_repo.query_range(target_id, since, limit=100)
                 if samples:
                     rtts = [s.rtt_ms for s in samples if s.rtt_ms is not None]
@@ -232,7 +266,6 @@ async def get_quality() -> dict:
                     else:
                         latency = {"min": None, "median": None, "p95": None, "max": None, "count": 0, "timeouts": timeouts}
 
-                    # Calculate jitter (std deviation of RTT)
                     jitter_ms = None
                     if len(rtts) > 1:
                         import statistics
@@ -259,36 +292,63 @@ async def get_quality() -> dict:
 async def get_quality_history(
     range: Literal["5m", "1h", "6h", "24h", "7d", "30d"] = Query(default="1h"),
     target_id: str = Query(default="primary"),
+    step: int = Query(default=60, ge=10, le=3600, description="Bucket size in seconds"),
 ) -> dict:
-    """Historical quality samples."""
+    """Historical quality samples with optional bucket aggregation."""
     try:
         quality_repo = _get_quality_repo()
-        # Validate range
         valid_ranges = ["5m", "1h", "6h", "24h", "7d", "30d"]
         if range not in valid_ranges:
             raise HTTPException(status_code=422, detail=f"Invalid range. Must be one of: {valid_ranges}")
 
-        # Calculate time window
         range_seconds = {"5m": 300, "1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800, "30d": 2592000}
         since = time.time() - range_seconds[range]
 
-        samples = quality_repo.query_range(target_id, since, limit=1000)
+        samples = quality_repo.query_range(target_id, since, limit=10000)
 
-        # Aggregate into buckets for response
-        points = []
-        for s in samples:
-            points.append({
-                "ts": s.ts,
-                "target_id": s.target_id,
-                "probe_type": s.probe_type,
-                "rtt_ms": s.rtt_ms,
-                "status": s.status,
-                "error_code": s.error_code,
-            })
+        if step > 60 and len(samples) > 200:
+            # Bucket aggregation
+            def latency_agg(values: list[float]) -> dict:
+                sorted_v = sorted(values)
+                n = len(sorted_v)
+                return {
+                    "min": sorted_v[0],
+                    "median": sorted_v[n // 2],
+                    "p95": sorted_v[int(n * 0.95)] if n > 1 else sorted_v[0],
+                    "max": sorted_v[-1],
+                }
+
+            buckets = _bucket_samples(
+                samples,
+                step,
+                value_fn=lambda s: s.rtt_ms,
+                agg_fn=latency_agg,
+            )
+
+            points = []
+            for b in buckets:
+                points.append({
+                    "ts": b["ts"],
+                    "latency": b["value"],
+                    "count": b["count"],
+                })
+        else:
+            # Raw points
+            points = []
+            for s in samples:
+                points.append({
+                    "ts": s.ts,
+                    "target_id": s.target_id,
+                    "probe_type": s.probe_type,
+                    "rtt_ms": s.rtt_ms,
+                    "status": s.status,
+                    "error_code": s.error_code,
+                })
 
         return {
             "target_id": target_id,
             "range": range,
+            "step": step,
             "points": points,
             **_common_metadata(source="storage"),
         }
@@ -296,6 +356,113 @@ async def get_quality_history(
         raise
     except Exception as e:
         logger.exception("Quality history endpoint failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/quality/status")
+async def get_quality_status(
+    range: Literal["5m", "1h", "6h", "24h", "7d", "30d"] = Query(default="1h"),
+) -> dict:
+    """Aggregated quality status with evidence."""
+    try:
+        analyzer = _get_quality_analyzer()
+        range_seconds = {"5m": 300, "1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800, "30d": 2592000}
+        since = time.time() - range_seconds[range]
+
+        analyses = analyzer.analyze_all_targets(range_key=range)
+        overall = analyzer.get_overall_status(analyses)
+
+        return {
+            "range": range,
+            "overall": overall,
+            "targets": {
+                target_id: {
+                    "latency": {
+                        "min_ms": a.latency.min_ms,
+                        "median_ms": a.latency.median_ms,
+                        "p95_ms": a.latency.p95_ms,
+                        "max_ms": a.latency.max_ms,
+                        "count": a.latency.count,
+                        "timeouts": a.latency.timeouts,
+                    },
+                    "jitter": {
+                        "mean_abs_diff_ms": a.jitter.mean_abs_diff_ms,
+                        "samples_used": a.jitter.samples_used,
+                    },
+                    "loss": {
+                        "total_samples": a.loss.total_samples,
+                        "loss_pct": a.loss.loss_pct,
+                        "by_error_code": a.loss.by_error_code,
+                    },
+                    "degradation": {
+                        "degraded": a.degradation.degraded,
+                        "reason": a.degradation.reason,
+                        "confidence": a.degradation.confidence,
+                        "details": a.degradation.details,
+                    },
+                    "last_probe_at": a.last_probe_at,
+                    "sample_count": a.sample_count,
+                }
+                for target_id, a in analyses.items()
+            },
+            **_common_metadata(source="analyzer"),
+        }
+    except Exception as e:
+        logger.exception("Quality status endpoint failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/tcp/stats")
+async def get_tcp_stats(
+    range: Literal["5m", "1h", "6h", "24h", "7d", "30d"] = Query(default="1h"),
+) -> dict:
+    """Current TCP statistics and history."""
+    try:
+        tcp_repo = _get_tcp_stats_repo()
+        valid_ranges = ["5m", "1h", "6h", "24h", "7d", "30d"]
+        if range not in valid_ranges:
+            raise HTTPException(status_code=422, detail=f"Invalid range. Must be one of: {valid_ranges}")
+
+        range_seconds = {"5m": 300, "1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800, "30d": 2592000}
+        since = time.time() - range_seconds[range]
+
+        latest = tcp_repo.get_latest()
+        samples = tcp_repo.query_range(since, limit=1000)
+
+        history = []
+        for s in samples:
+            history.append({
+                "ts": s.ts,
+                "active_opens": s.active_opens,
+                "passive_opens": s.passive_opens,
+                "failed_attempts": s.failed_attempts,
+                "established_resets": s.established_resets,
+                "current_established": s.current_established,
+                "segments_sent": s.segments_sent,
+                "segments_received": s.segments_received,
+                "segments_retransmitted": s.segments_retransmitted,
+                "source": s.source,
+            })
+
+        return {
+            "range": range,
+            "current": {
+                "active_opens": latest.active_opens if latest else None,
+                "passive_opens": latest.passive_opens if latest else None,
+                "failed_attempts": latest.failed_attempts if latest else None,
+                "established_resets": latest.established_resets if latest else None,
+                "current_established": latest.current_established if latest else None,
+                "segments_sent": latest.segments_sent if latest else None,
+                "segments_received": latest.segments_received if latest else None,
+                "segments_retransmitted": latest.segments_retransmitted if latest else None,
+                "source": latest.source if latest else None,
+                "ts": latest.ts if latest else None,
+            },
+            "history": history,
+            **_common_metadata(source="storage"),
+        }
+    except Exception as e:
+        logger.exception("TCP stats endpoint failed")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -310,10 +477,8 @@ async def get_interfaces() -> dict:
         net_snapshot = metrics_adapter.get_network_snapshot()
         adapters = net_snapshot.get("adapters", [])
 
-        # Merge interface samples with adapter details
         interfaces = []
         for sample in latest_samples:
-            # Find matching adapter
             adapter_info = next((a for a in adapters if a.get("connection_name") == sample.interface_id or a.get("name") == sample.interface_id), {})
 
             interfaces.append({

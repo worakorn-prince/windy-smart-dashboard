@@ -107,10 +107,22 @@ export interface HistoryPoint {
   error_code: string | null
 }
 
+export interface BucketedLatencyPoint {
+  ts: number
+  latency: {
+    min: number
+    median: number
+    p95: number
+    max: number
+  }
+  count: number
+}
+
 export interface QualityHistoryData {
   target_id: string
   range: string
-  points: HistoryPoint[]
+  step: number
+  points: (HistoryPoint | BucketedLatencyPoint)[]
   generated_at: number
   data_window: { start: number; end: number }
   source: string
@@ -146,12 +158,74 @@ export interface InterfaceHistoryData {
   coverage: number
 }
 
+// Quality Status types
+export interface QualityTargetStatus {
+  target_id: string
+  latency_median_ms: number | null
+  jitter_ms: number | null
+  loss_pct: number
+  last_probe_at: number | null
+  sample_count: number
+  degraded: boolean
+  degradation_reason: string | null
+  degradation_confidence: number
+}
+
+export interface QualityOverallStatus {
+  status: 'good' | 'degraded' | 'poor' | 'unknown'
+  badge: string
+  confidence: number
+  evidence: QualityTargetStatus[]
+  degraded_targets: string[]
+  analyzed_at: number
+}
+
+export interface QualityStatusData {
+  range: string
+  overall: QualityOverallStatus
+  targets: Record<string, QualityTargetStatus>
+  generated_at: number
+  data_window: { start: number; end: number }
+  source: string
+  status: string
+  errors: string[]
+  coverage: number
+}
+
+// TCP Stats types
+export interface TcpStatsSample {
+  ts: number
+  active_opens: number
+  passive_opens: number
+  failed_attempts: number
+  established_resets: number
+  current_established: number
+  segments_sent: number
+  segments_received: number
+  segments_retransmitted: number
+  source: string
+}
+
+export interface TcpStatsData {
+  range: string
+  current: TcpStatsSample | null
+  history: TcpStatsSample[]
+  generated_at: number
+  data_window: { start: number; end: number }
+  source: string
+  status: string
+  errors: string[]
+  coverage: number
+}
+
 export const useInternetStore = defineStore('internet', () => {
   const overview = ref<OverviewData | null>(null)
   const quality = ref<QualityData | null>(null)
   const interfaces = ref<InterfacesData | null>(null)
   const qualityHistory = ref<QualityHistoryData | null>(null)
   const interfaceHistory = ref<InterfaceHistoryData | null>(null)
+  const qualityStatus = ref<QualityStatusData | null>(null)
+  const tcpStats = ref<TcpStatsData | null>(null)
 
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -159,10 +233,8 @@ export const useInternetStore = defineStore('internet', () => {
   const isConnected = computed(() => overview.value?.connection_status === 'connected')
   const isDegraded = computed(() => overview.value?.connection_status === 'degraded')
   const primaryLatency = computed(() => {
-    // First check quality.value (from /api/internet/quality)
     let target = quality.value?.targets?.find(t => t.target_id === 'primary')
     if (target?.latency_ms?.median != null) return target.latency_ms.median
-    // Fallback to overview.internet_quality (from /api/internet/overview)
     target = overview.value?.internet_quality?.primary
     return target?.latency_ms?.median ?? null
   })
@@ -178,6 +250,9 @@ export const useInternetStore = defineStore('internet', () => {
     target = overview.value?.internet_quality?.gateway
     return target?.latency_ms?.median ?? null
   })
+
+  const qualityBadge = computed(() => qualityStatus.value?.overall.badge ?? '—')
+  const qualityOverallStatus = computed(() => qualityStatus.value?.overall.status ?? 'unknown')
 
   async function loadOverview() {
     loading.value = true
@@ -224,14 +299,48 @@ export const useInternetStore = defineStore('internet', () => {
     }
   }
 
-  async function loadQualityHistory(range: '5m' | '1h' | '6h' | '24h' | '7d' | '30d' = '1h', targetId = 'primary') {
+  async function loadQualityHistory(
+    range: '5m' | '1h' | '6h' | '24h' | '7d' | '30d' = '1h',
+    targetId = 'primary',
+    step = 60
+  ) {
     loading.value = true
     error.value = null
     try {
-      const resp = await fetch(`/api/internet/quality/history?range=${range}&target_id=${targetId}`)
+      const resp = await fetch(`/api/internet/quality/history?range=${range}&target_id=${targetId}&step=${step}`)
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const data = await resp.json()
       qualityHistory.value = data
+    } catch (err: any) {
+      error.value = String(err?.message ?? err)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function loadQualityStatus(range: '5m' | '1h' | '6h' | '24h' | '7d' | '30d' = '1h') {
+    loading.value = true
+    error.value = null
+    try {
+      const resp = await fetch(`/api/internet/quality/status?range=${range}`)
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json()
+      qualityStatus.value = data
+    } catch (err: any) {
+      error.value = String(err?.message ?? err)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function loadTcpStats(range: '5m' | '1h' | '6h' | '24h' | '7d' | '30d' = '1h') {
+    loading.value = true
+    error.value = null
+    try {
+      const resp = await fetch(`/api/internet/tcp/stats?range=${range}`)
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json()
+      tcpStats.value = data
     } catch (err: any) {
       error.value = String(err?.message ?? err)
     } finally {
@@ -264,6 +373,8 @@ export const useInternetStore = defineStore('internet', () => {
     interfaces,
     qualityHistory,
     interfaceHistory,
+    qualityStatus,
+    tcpStats,
     loading,
     error,
     isConnected,
@@ -271,10 +382,14 @@ export const useInternetStore = defineStore('internet', () => {
     primaryLatency,
     primaryLoss,
     gatewayLatency,
+    qualityBadge,
+    qualityOverallStatus,
     loadOverview,
     loadQuality,
     loadInterfaces,
     loadQualityHistory,
+    loadQualityStatus,
+    loadTcpStats,
     loadInterfaceHistory,
     loadAll,
   }

@@ -1,6 +1,33 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+
+// Polyfills for jsdom (must be before component imports)
+vi.hoisted(() => {
+  // matchMedia for uPlot
+  Object.defineProperty(globalThis, 'matchMedia', {
+    value: vi.fn().mockImplementation(query => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+    writable: true,
+  })
+  // ResizeObserver for uPlot
+  globalThis.ResizeObserver = vi.fn().mockImplementation(() => ({
+    observe: vi.fn(),
+    unobserve: vi.fn(),
+    disconnect: vi.fn(),
+  }))
+})
+
+import { mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import InternetOverview from '@/components/internet/InternetOverview.vue'
 import QualitySummary from '@/components/internet/QualitySummary.vue'
 import InternetInsights from '@/components/internet/InternetInsights.vue'

@@ -10,8 +10,9 @@ import pytest
 
 from internet_insights.collectors.quality import QualityCollector
 from internet_insights.collectors.interface import InterfaceCollector
+from internet_insights.collectors.tcp_stats import TcpStatsCollector
 from internet_insights.services.collector_manager import CollectorManager
-from internet_insights.storage.repositories import QualitySampleRepository, InterfaceSampleRepository
+from internet_insights.storage.repositories import QualitySampleRepository, InterfaceSampleRepository, TcpStatsRepository
 from internet_insights.storage.database import InternetInsightsDB
 
 
@@ -215,6 +216,7 @@ class TestCollectorManager:
                     manager._repositories = {
                         "quality": quality_repo,
                         "interface": interface_repo,
+                        "tcp_stats": TcpStatsRepository(temp_db),
                     }
                     manager._init_collectors()
 
@@ -235,6 +237,7 @@ class TestCollectorManager:
         manager._repositories = {
             "quality": quality_repo,
             "interface": interface_repo,
+            "tcp_stats": TcpStatsRepository(temp_db),
         }
         manager._init_collectors()
 
@@ -252,6 +255,7 @@ class TestCollectorManager:
         manager._repositories = {
             "quality": quality_repo,
             "interface": interface_repo,
+            "tcp_stats": TcpStatsRepository(temp_db),
         }
         manager._init_collectors()
 
