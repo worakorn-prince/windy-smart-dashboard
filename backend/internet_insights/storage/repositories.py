@@ -70,6 +70,30 @@ class DnsProbeSample:
 
 
 @dataclass
+class RouteSample:
+    ts: float
+    destination: str
+    prefix_length: int
+    next_hop: str | None
+    interface_index: int
+    metric: int
+    protocol: int
+    age: int
+    origin: int
+    is_default: int
+
+
+@dataclass
+class TracerouteSample:
+    ts: float
+    destination: str
+    hop: int
+    address: str | None
+    rtt_ms: float | None
+    status: str
+
+
+@dataclass
 class DiagnosticSession:
     id: str
     started_at: float
@@ -589,6 +613,233 @@ class DnsProbeRepository:
     def prune(self, cutoff_ts: float) -> int:
         cursor = self.db.execute(
             "DELETE FROM internet_dns_probe_samples WHERE ts < ?",
+            (cutoff_ts,),
+        )
+        self.db.commit()
+        return cursor.rowcount
+
+
+class RouteSampleRepository:
+    """Repository for internet_route_samples table."""
+
+    def __init__(self, db: InternetInsightsDB | None = None):
+        self.db = db or get_db()
+
+    def insert(self, sample: RouteSample) -> int:
+        cursor = self.db.execute(
+            """
+            INSERT INTO internet_route_samples
+            (ts, destination, prefix_length, next_hop, interface_index, metric, protocol, age, origin, is_default)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                sample.ts,
+                sample.destination,
+                sample.prefix_length,
+                sample.next_hop,
+                sample.interface_index,
+                sample.metric,
+                sample.protocol,
+                sample.age,
+                sample.origin,
+                sample.is_default,
+            ),
+        )
+        self.db.commit()
+        return cursor.lastrowid
+
+    def insert_batch(self, samples: list[RouteSample]) -> int:
+        if not samples:
+            return 0
+        params = [
+            (
+                s.ts,
+                s.destination,
+                s.prefix_length,
+                s.next_hop,
+                s.interface_index,
+                s.metric,
+                s.protocol,
+                s.age,
+                s.origin,
+                s.is_default,
+            )
+            for s in samples
+        ]
+        self.db.executemany(
+            """
+            INSERT INTO internet_route_samples
+            (ts, destination, prefix_length, next_hop, interface_index, metric, protocol, age, origin, is_default)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            params,
+        )
+        self.db.commit()
+        return len(samples)
+
+    def query_range(self, since: float, until: float | None = None, limit: int = 1000) -> list[RouteSample]:
+        if until is None:
+            until = time.time()
+        rows = self.db.fetchall(
+            """
+            SELECT ts, destination, prefix_length, next_hop, interface_index, metric, protocol, age, origin, is_default
+            FROM internet_route_samples
+            WHERE ts >= ? AND ts <= ?
+            ORDER BY ts DESC LIMIT ?
+            """,
+            (since, until, limit),
+        )
+        return [
+            RouteSample(
+                ts=r[0],
+                destination=r[1],
+                prefix_length=r[2],
+                next_hop=r[3],
+                interface_index=r[4],
+                metric=r[5],
+                protocol=r[6],
+                age=r[7],
+                origin=r[8],
+                is_default=r[9],
+            )
+            for r in rows
+        ]
+
+    def get_latest_snapshot(self) -> list[RouteSample]:
+        """Get the most recent route snapshot (all routes from latest timestamp)."""
+        rows = self.db.fetchall(
+            """
+            SELECT ts, destination, prefix_length, next_hop, interface_index, metric, protocol, age, origin, is_default
+            FROM internet_route_samples
+            WHERE ts = (SELECT MAX(ts) FROM internet_route_samples)
+            ORDER BY is_default DESC, metric ASC
+            """,
+        )
+        return [
+            RouteSample(
+                ts=r[0],
+                destination=r[1],
+                prefix_length=r[2],
+                next_hop=r[3],
+                interface_index=r[4],
+                metric=r[5],
+                protocol=r[6],
+                age=r[7],
+                origin=r[8],
+                is_default=r[9],
+            )
+            for r in rows
+        ]
+
+    def prune(self, cutoff_ts: float) -> int:
+        cursor = self.db.execute(
+            "DELETE FROM internet_route_samples WHERE ts < ?",
+            (cutoff_ts,),
+        )
+        self.db.commit()
+        return cursor.rowcount
+
+
+class TracerouteSampleRepository:
+    """Repository for internet_traceroute_samples table."""
+
+    def __init__(self, db: InternetInsightsDB | None = None):
+        self.db = db or get_db()
+
+    def insert(self, sample: TracerouteSample) -> int:
+        cursor = self.db.execute(
+            """
+            INSERT INTO internet_traceroute_samples
+            (ts, destination, hop, address, rtt_ms, status)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                sample.ts,
+                sample.destination,
+                sample.hop,
+                sample.address,
+                sample.rtt_ms,
+                sample.status,
+            ),
+        )
+        self.db.commit()
+        return cursor.lastrowid
+
+    def insert_batch(self, samples: list[TracerouteSample]) -> int:
+        if not samples:
+            return 0
+        params = [
+            (
+                s.ts,
+                s.destination,
+                s.hop,
+                s.address,
+                s.rtt_ms,
+                s.status,
+            )
+            for s in samples
+        ]
+        self.db.executemany(
+            """
+            INSERT INTO internet_traceroute_samples
+            (ts, destination, hop, address, rtt_ms, status)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            params,
+        )
+        self.db.commit()
+        return len(samples)
+
+    def query_range(self, destination: str, since: float, until: float | None = None, limit: int = 1000) -> list[TracerouteSample]:
+        if until is None:
+            until = time.time()
+        rows = self.db.fetchall(
+            """
+            SELECT ts, destination, hop, address, rtt_ms, status
+            FROM internet_traceroute_samples
+            WHERE destination = ? AND ts >= ? AND ts <= ?
+            ORDER BY ts DESC, hop ASC LIMIT ?
+            """,
+            (destination, since, until, limit),
+        )
+        return [
+            TracerouteSample(
+                ts=r[0],
+                destination=r[1],
+                hop=r[2],
+                address=r[3],
+                rtt_ms=r[4],
+                status=r[5],
+            )
+            for r in rows
+        ]
+
+    def get_latest_traceroute(self, destination: str) -> list[TracerouteSample]:
+        """Get the most recent traceroute for a destination."""
+        rows = self.db.fetchall(
+            """
+            SELECT ts, destination, hop, address, rtt_ms, status
+            FROM internet_traceroute_samples
+            WHERE destination = ? AND ts = (SELECT MAX(ts) FROM internet_traceroute_samples WHERE destination = ?)
+            ORDER BY hop ASC
+            """,
+            (destination, destination),
+        )
+        return [
+            TracerouteSample(
+                ts=r[0],
+                destination=r[1],
+                hop=r[2],
+                address=r[3],
+                rtt_ms=r[4],
+                status=r[5],
+            )
+            for r in rows
+        ]
+
+    def prune(self, cutoff_ts: float) -> int:
+        cursor = self.db.execute(
+            "DELETE FROM internet_traceroute_samples WHERE ts < ?",
             (cutoff_ts,),
         )
         self.db.commit()

@@ -9,6 +9,8 @@ import Security from './pages/Security.vue'
 import Maintenance from './pages/Maintenance.vue'
 import Insights from './pages/Insights.vue'
 import InternetInsights from '@/components/internet/InternetInsights.vue'
+import InternetDNS from './pages/InternetDNS.vue'
+import InternetRouting from './pages/InternetRouting.vue'
 import { autoTip } from './directives/autoTip'
 
 const router = createRouter({
@@ -19,6 +21,8 @@ const router = createRouter({
     { path: '/maintenance', name: 'maintenance', component: Maintenance },
     { path: '/insights', name: 'insights', component: Insights },
     { path: '/internet-insights', name: 'internet-insights', component: InternetInsights },
+    { path: '/internet-dns', name: 'internet-dns', component: InternetDNS },
+    { path: '/internet-routing', name: 'internet-routing', component: InternetRouting },
   ],
 })
 

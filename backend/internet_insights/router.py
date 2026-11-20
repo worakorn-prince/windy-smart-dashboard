@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+import statistics
 import time
 from typing import Literal
 
@@ -37,7 +40,12 @@ _history_adapter = None
 _quality_repo = None
 _interface_repo = None
 _tcp_stats_repo = None
+_dns_probe_repo = None
+_route_repo = None
+_traceroute_repo = None
 _quality_analyzer = None
+_dns_analyzer = None
+_route_analyzer = None
 _collector_manager = None
 
 
@@ -105,7 +113,52 @@ def _get_tcp_stats_repo():
     return _tcp_stats_repo
 
 
+def _get_dns_probe_repo():
+    global _dns_probe_repo
+    if _dns_probe_repo is None:
+        from .storage.repositories import DnsProbeRepository
+        _dns_probe_repo = DnsProbeRepository()
+    return _dns_probe_repo
+
+
+def _get_route_repo():
+    global _route_repo
+    if _route_repo is None:
+        from .storage.repositories import RouteSampleRepository
+        _route_repo = RouteSampleRepository()
+    return _route_repo
+
+
+def _get_traceroute_repo():
+    global _traceroute_repo
+    if _traceroute_repo is None:
+        from .storage.repositories import TracerouteSampleRepository
+        _traceroute_repo = TracerouteSampleRepository()
+    return _traceroute_repo
+
+
 def _get_quality_analyzer():
+    global _quality_analyzer
+    if _quality_analyzer is None:
+        from .analyzers.quality import QualityAnalyzer
+        _quality_analyzer = QualityAnalyzer()
+    return _quality_analyzer
+
+
+def _get_dns_analyzer():
+    global _dns_analyzer
+    if _dns_analyzer is None:
+        from .analyzers.dns import DnsAnalyzer
+        _dns_analyzer = DnsAnalyzer()
+    return _dns_analyzer
+
+
+def _get_route_analyzer():
+    global _route_analyzer
+    if _route_analyzer is None:
+        from .analyzers.route import RouteAnalyzer
+        _route_analyzer = RouteAnalyzer()
+    return _route_analyzer
     global _quality_analyzer
     if _quality_analyzer is None:
         from .analyzers.quality import QualityAnalyzer
@@ -566,4 +619,378 @@ async def get_collectors_status() -> dict:
         return {"collectors": cm.get_status(), **_common_metadata(source="service")}
     except Exception as e:
         logger.exception("Collector status endpoint failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# ===== DNS Endpoints =====
+
+@router.get("/dns")
+async def get_dns() -> dict:
+    """DNS configuration and health overview."""
+    try:
+        dns_repo = _get_dns_probe_repo()
+        metrics_adapter = _get_metrics_adapter()
+        dns_analyzer = _get_dns_analyzer()
+
+        # Get configured resolvers from adapters
+        snapshot = metrics_adapter.get_network_snapshot()
+        configured_resolvers = []
+        for adapter in snapshot.get("adapters", []):
+            for dns in adapter.get("dns", []):
+                if dns and dns not in configured_resolvers:
+                    configured_resolvers.append(dns)
+
+        # Get latest probe for each resolver
+        resolver_health = []
+        for resolver in configured_resolvers:
+            latest = dns_repo.query_range(resolver, time.time() - 300, limit=10)
+            if latest:
+                successful = [s for s in latest if s.status == "success" and s.duration_ms is not None]
+                timeouts = sum(1 for s in latest if s.status == "timeout")
+                total = len(latest)
+                avg_latency = statistics.mean([s.duration_ms for s in successful]) if successful else None
+                success_rate = (len(successful) / total * 100) if total > 0 else 0
+                resolver_health.append({
+                    "resolver": resolver,
+                    "status": "ok" if success_rate > 50 else "degraded" if success_rate > 0 else "down",
+                    "avg_latency_ms": round(avg_latency, 1) if avg_latency else None,
+                    "success_rate": round(success_rate, 1),
+                    "recent_probes": total,
+                    "last_probe_at": latest[0].ts if latest else None,
+                })
+            else:
+                resolver_health.append({
+                    "resolver": resolver,
+                    "status": "unknown",
+                    "avg_latency_ms": None,
+                    "success_rate": 0,
+                    "recent_probes": 0,
+                    "last_probe_at": None,
+                })
+
+        return {
+            "configured_resolvers": configured_resolvers,
+            "resolver_health": resolver_health,
+            **_common_metadata(),
+        }
+    except Exception as e:
+        logger.exception("DNS endpoint failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/dns/history")
+async def get_dns_history(
+    range: Literal["5m", "1h", "6h", "24h", "7d", "30d"] = Query(default="1h"),
+    resolver: str = Query(default=""),
+    hostname: str = Query(default=""),
+    record_type: str = Query(default=""),
+    probe_method: str = Query(default=""),
+    step: int = Query(default=60, ge=10, le=3600),
+) -> dict:
+    """DNS probe history with optional filters."""
+    try:
+        import statistics
+        dns_repo = _get_dns_probe_repo()
+        range_seconds = _validate_range(range)
+        since = time.time() - range_seconds
+
+        # Query all resolvers if not specified
+        if resolver:
+            samples = dns_repo.query_range(resolver, since, limit=10000)
+        else:
+            # Get all samples by querying each known resolver
+            # For simplicity, query with empty resolver (will need adjustment)
+            samples = dns_repo.query_range("", since, limit=10000)
+
+        if hostname:
+            samples = [s for s in samples if s.hostname == hostname]
+        if record_type:
+            samples = [s for s in samples if s.record_type == record_type]
+        if probe_method:
+            samples = [s for s in samples if s.probe_method == probe_method]
+
+        if step > 60 and len(samples) > 200:
+            def latency_agg(values: list[float]) -> dict:
+                sorted_v = sorted(values)
+                n = len(sorted_v)
+                return {
+                    "min": sorted_v[0],
+                    "median": sorted_v[n // 2],
+                    "p95": sorted_v[int(n * 0.95)] if n > 1 else sorted_v[0],
+                    "max": sorted_v[-1],
+                }
+
+            buckets = _bucket_samples(
+                samples,
+                step,
+                value_fn=lambda s: s.duration_ms,
+                agg_fn=latency_agg,
+            )
+
+            points = []
+            for b in buckets:
+                points.append({
+                    "ts": b["ts"],
+                    "latency": b["value"],
+                    "count": b["count"],
+                })
+        else:
+            points = []
+            for s in samples:
+                points.append({
+                    "ts": s.ts,
+                    "resolver": s.resolver,
+                    "hostname": s.hostname,
+                    "record_type": s.record_type,
+                    "duration_ms": s.duration_ms,
+                    "status": s.status,
+                    "answer_count": s.answer_count,
+                    "error_code": s.error_code,
+                    "probe_method": s.probe_method,
+                })
+
+        return {
+            "range": range,
+            "step": step,
+            "points": points,
+            **_common_metadata(source="storage"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("DNS history endpoint failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/dns/compare")
+async def get_dns_compare(
+    hostname: str = Query(default="cloudflare.com"),
+    record_type: str = Query(default="A"),
+) -> dict:
+    """On-demand resolver comparison for a hostname."""
+    try:
+        dns_analyzer = _get_dns_analyzer()
+        collector_manager = _get_collector_manager()
+        dns_collector = collector_manager.get_collector("dns")
+
+        if dns_collector:
+            comparison = await dns_collector.compare_resolvers(hostname, record_type)
+        else:
+            comparison = dns_analyzer.compare_resolvers(hostname, record_type)
+
+        return {
+            "hostname": hostname,
+            "record_type": record_type,
+            "comparison": comparison,
+            **_common_metadata(),
+        }
+    except Exception as e:
+        logger.exception("DNS compare endpoint failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# ===== Route Endpoints =====
+
+@router.get("/routes")
+async def get_routes() -> dict:
+    """Current route table snapshot."""
+    try:
+        route_repo = _get_route_repo()
+        collector_manager = _get_collector_manager()
+        route_collector = collector_manager.get_collector("route")
+
+        # Get latest route snapshot
+        routes = route_repo.get_latest_snapshot()
+
+        # Get default gateway info
+        gateway_ip = None
+        gateway_iface = None
+        if route_collector:
+            gateway_ip, gateway_iface = route_collector.get_default_gateway()
+
+        route_list = []
+        for r in routes:
+            route_list.append({
+                "destination": r.destination,
+                "prefix_length": r.prefix_length,
+                "next_hop": r.next_hop,
+                "interface_index": r.interface_index,
+                "metric": r.metric,
+                "protocol": r.protocol,
+                "age": r.age,
+                "origin": r.origin,
+                "is_default": bool(r.is_default),
+            })
+
+        return {
+            "routes": route_list,
+            "default_gateway": gateway_ip,
+            "gateway_interface_index": gateway_iface,
+            "snapshot_ts": routes[0].ts if routes else None,
+            **_common_metadata(),
+        }
+    except Exception as e:
+        logger.exception("Routes endpoint failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/diagnostics/traceroute")
+async def post_traceroute(
+    target: str = Query(...),
+    max_hops: int = Query(default=30, ge=1, le=64),
+    timeout_ms: int = Query(default=3000, ge=500, le=30000),
+    protocol: Literal["icmp", "udp"] = Query(default="udp"),
+) -> dict:
+    """On-demand traceroute to target."""
+    try:
+        collector_manager = _get_collector_manager()
+        route_collector = collector_manager.get_collector("route")
+        traceroute_repo = _get_traceroute_repo()
+
+        if not route_collector:
+            raise HTTPException(status_code=503, detail="Route collector not available")
+
+        # Create diagnostic session
+        from ..storage.repositories import DiagnosticSessionRepository, DiagnosticResultRepository, generate_session_id
+        session_repo = DiagnosticSessionRepository()
+        result_repo = DiagnosticResultRepository()
+        session_id = generate_session_id()
+
+        session = await asyncio.to_thread(
+            session_repo.create,
+            type('DiagnosticSession', (), {
+                'id': session_id,
+                'started_at': time.time(),
+                'completed_at': None,
+                'status': 'running',
+                'target': target,
+                'diagnostic_type': 'traceroute',
+                'config_json': f'{{"max_hops": {max_hops}, "timeout_ms": {timeout_ms}, "protocol": "{protocol}"}}',
+                'summary_json': None,
+                'error': None,
+            })()
+        )
+
+        try:
+            hops = await route_collector.traceroute(target, max_hops, timeout_ms, protocol)
+
+            # Store hop results
+            results = [
+                type('DiagnosticResult', (), {
+                    'session_id': session_id,
+                    'ts': time.time(),
+                    'sequence': i,
+                    'result_type': 'hop',
+                    'payload_json': json.dumps({
+                        "hop": h.hop,
+                        "address": h.address,
+                        "rtt_ms": h.rtt_ms,
+                        "status": h.status,
+                    }),
+                })()
+                for i, h in enumerate(hops)
+            ]
+            await asyncio.to_thread(result_repo.insert_batch, results)
+
+            # Store in traceroute samples table
+            ts = time.time()
+            traceroute_samples = [
+                type('TracerouteSample', (), {
+                    'ts': ts,
+                    'destination': target,
+                    'hop': h.hop,
+                    'address': h.address,
+                    'rtt_ms': h.rtt_ms,
+                    'status': h.status,
+                })()
+                for h in hops
+            ]
+            await asyncio.to_thread(traceroute_repo.insert_batch, traceroute_samples)
+
+            # Update session
+            await asyncio.to_thread(
+                session_repo.update,
+                type('DiagnosticSession', (), {
+                    'id': session_id,
+                    'started_at': session.started_at,
+                    'completed_at': time.time(),
+                    'status': 'completed',
+                    'target': target,
+                    'diagnostic_type': 'traceroute',
+                    'config_json': f'{{"max_hops": {max_hops}, "timeout_ms": {timeout_ms}, "protocol": "{protocol}"}}',
+                    'summary_json': f'{{"hop_count": {len(hops)}, "max_rtt_ms": max((h.rtt_ms or 0 for h in hops), default=0)}}',
+                    'error': None,
+                })()
+            )
+
+            return {
+                "session_id": session_id,
+                "target": target,
+                "max_hops": max_hops,
+                "protocol": protocol,
+                "hops": [
+                    {
+                        "hop": h.hop,
+                        "address": h.address,
+                        "rtt_ms": h.rtt_ms,
+                        "status": h.status,
+                    }
+                    for h in hops
+                ],
+                **_common_metadata(),
+            }
+        except Exception as e:
+            await asyncio.to_thread(
+                session_repo.update,
+                type('DiagnosticSession', (), {
+                    'id': session_id,
+                    'started_at': session.started_at,
+                    'completed_at': time.time(),
+                    'status': 'failed',
+                    'target': target,
+                    'diagnostic_type': 'traceroute',
+                    'config_json': f'{{"max_hops": {max_hops}, "timeout_ms": {timeout_ms}, "protocol": "{protocol}"}}',
+                    'summary_json': None,
+                    'error': str(e),
+                })()
+            )
+            raise
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Traceroute endpoint failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/routes/history")
+async def get_routes_history(
+    range: Literal["5m", "1h", "6h", "24h", "7d", "30d"] = Query(default="1h"),
+) -> dict:
+    """Route changes history."""
+    try:
+        route_analyzer = _get_route_analyzer()
+        range_seconds = _validate_range(range)
+        since = time.time() - range_seconds
+
+        changes = route_analyzer.detect_route_changes(since)
+
+        change_list = []
+        for c in changes:
+            change_list.append({
+                "timestamp": c.timestamp,
+                "change_type": c.change_type,
+                "details": c.details,
+                "severity": c.severity,
+            })
+
+        return {
+            "range": range,
+            "changes": change_list,
+            **_common_metadata(source="analyzer"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Route history endpoint failed")
         raise HTTPException(status_code=500, detail=str(e)) from e

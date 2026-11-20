@@ -84,7 +84,7 @@ class TestMigrations:
     def test_apply_migrations_creates_all_tables(self, temp_db: InternetInsightsDB):
         conn = temp_db._get_conn()
         version = apply_migrations(conn)
-        assert version == 1
+        assert version == 2
 
         # Verify all tables exist
         tables = conn.execute(
@@ -96,6 +96,8 @@ class TestMigrations:
             "internet_interface_samples",
             "internet_tcp_stats_samples",
             "internet_dns_probe_samples",
+            "internet_route_samples",
+            "internet_traceroute_samples",
             "internet_diagnostic_sessions",
             "internet_diagnostic_results",
             "internet_incidents",
@@ -110,13 +112,13 @@ class TestMigrations:
         version1 = get_current_version(conn)
         apply_migrations(conn)  # Run again
         version2 = get_current_version(conn)
-        assert version1 == version2 == 1
+        assert version1 == version2 == 2
 
     def test_version_table_has_correct_value(self, temp_db: InternetInsightsDB):
         conn = temp_db._get_conn()
         apply_migrations(conn)
         row = conn.execute("SELECT version FROM internet_insights_schema_version").fetchone()
-        assert row[0] == 1
+        assert row[0] == 2
 
 
 class TestQualitySampleRepository:

@@ -165,8 +165,49 @@ CREATE TABLE IF NOT EXISTS internet_insights_schema_version (
 INSERT OR IGNORE INTO internet_insights_schema_version (version) VALUES (1);
 """
 
+# V2 Schema - Add route and traceroute tables
+V2_SCHEMA_SQL = """
+-- internet_route_samples
+CREATE TABLE IF NOT EXISTS internet_route_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    destination TEXT NOT NULL,
+    prefix_length INTEGER NOT NULL,
+    next_hop TEXT,
+    interface_index INTEGER NOT NULL,
+    metric INTEGER NOT NULL,
+    protocol INTEGER NOT NULL,
+    age INTEGER NOT NULL,
+    origin INTEGER NOT NULL,
+    is_default INTEGER DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_route_ts ON internet_route_samples (ts);
+CREATE INDEX IF NOT EXISTS idx_route_dest_ts ON internet_route_samples (destination, ts);
+CREATE INDEX IF NOT EXISTS idx_route_default ON internet_route_samples (is_default, ts);
+
+-- internet_traceroute_samples
+CREATE TABLE IF NOT EXISTS internet_traceroute_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    destination TEXT NOT NULL,
+    hop INTEGER NOT NULL,
+    address TEXT,
+    rtt_ms REAL,
+    status TEXT NOT NULL,
+    CONSTRAINT chk_traceroute_status CHECK (status IN ('success','timeout','unreachable','error'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_traceroute_dest_ts ON internet_traceroute_samples (destination, ts);
+CREATE INDEX IF NOT EXISTS idx_traceroute_ts ON internet_traceroute_samples (ts);
+
+-- Update schema version
+UPDATE internet_insights_schema_version SET version = 2;
+"""
+
 MIGRATIONS: dict[int, str] = {
     1: V1_SCHEMA_SQL,
+    2: V2_SCHEMA_SQL,
 }
 
 CURRENT_VERSION = max(MIGRATIONS.keys())

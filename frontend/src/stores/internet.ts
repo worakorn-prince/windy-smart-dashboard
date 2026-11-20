@@ -218,6 +218,148 @@ export interface TcpStatsData {
   coverage: number
 }
 
+// DNS types
+export interface DnsResolverHealth {
+  resolver: string
+  status: 'ok' | 'degraded' | 'down' | 'unknown'
+  avg_latency_ms: number | null
+  success_rate: number
+  recent_probes: number
+  last_probe_at: number | null
+}
+
+export interface DnsData {
+  configured_resolvers: string[]
+  resolver_health: DnsResolverHealth[]
+  generated_at: number
+  data_window: { start: number; end: number }
+  source: string
+  status: string
+  errors: string[]
+  coverage: number
+}
+
+export interface DnsHistoryPoint {
+  ts: number
+  resolver: string
+  hostname: string
+  record_type: string
+  duration_ms: number | null
+  status: string
+  answer_count: number
+  error_code: string | null
+  probe_method: string
+}
+
+export interface DnsBucketedPoint {
+  ts: number
+  latency: {
+    min: number
+    median: number
+    p95: number
+    max: number
+  }
+  count: number
+}
+
+export interface DnsHistoryData {
+  range: string
+  step: number
+  points: (DnsHistoryPoint | DnsBucketedPoint)[]
+  generated_at: number
+  data_window: { start: number; end: number }
+  source: string
+  status: string
+  errors: string[]
+  coverage: number
+}
+
+export interface DnsComparisonResult {
+  resolver: string
+  probe_method: string
+  duration_ms: number | null
+  status: string
+  answer_count: number
+  error_code: string | null
+}
+
+export interface DnsCompareData {
+  hostname: string
+  record_type: string
+  comparison: DnsComparisonResult[]
+  generated_at: number
+  data_window: { start: number; end: number }
+  source: string
+  status: string
+  errors: string[]
+  coverage: number
+}
+
+// Route types
+export interface RouteEntry {
+  destination: string
+  prefix_length: number
+  next_hop: string | null
+  interface_index: number
+  metric: number
+  protocol: number
+  age: number
+  origin: number
+  is_default: boolean
+}
+
+export interface RoutesData {
+  routes: RouteEntry[]
+  default_gateway: string | null
+  gateway_interface_index: number | null
+  snapshot_ts: number | null
+  generated_at: number
+  data_window: { start: number; end: number }
+  source: string
+  status: string
+  errors: string[]
+  coverage: number
+}
+
+export interface TracerouteHop {
+  hop: number
+  address: string | null
+  rtt_ms: number | null
+  status: string
+}
+
+export interface TracerouteData {
+  session_id: string
+  target: string
+  max_hops: number
+  protocol: string
+  hops: TracerouteHop[]
+  generated_at: number
+  data_window: { start: number; end: number }
+  source: string
+  status: string
+  errors: string[]
+  coverage: number
+}
+
+export interface RouteChange {
+  timestamp: number
+  change_type: string
+  details: Record<string, unknown>
+  severity: string
+}
+
+export interface RoutesHistoryData {
+  range: string
+  changes: RouteChange[]
+  generated_at: number
+  data_window: { start: number; end: number }
+  source: string
+  status: string
+  errors: string[]
+  coverage: number
+}
+
 export const useInternetStore = defineStore('internet', () => {
   const overview = ref<OverviewData | null>(null)
   const quality = ref<QualityData | null>(null)
@@ -226,6 +368,12 @@ export const useInternetStore = defineStore('internet', () => {
   const interfaceHistory = ref<InterfaceHistoryData | null>(null)
   const qualityStatus = ref<QualityStatusData | null>(null)
   const tcpStats = ref<TcpStatsData | null>(null)
+  const dns = ref<DnsData | null>(null)
+  const dnsHistory = ref<DnsHistoryData | null>(null)
+  const dnsCompare = ref<DnsCompareData | null>(null)
+  const routes = ref<RoutesData | null>(null)
+  const traceroute = ref<TracerouteData | null>(null)
+  const routesHistory = ref<RoutesHistoryData | null>(null)
 
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -363,6 +511,101 @@ export const useInternetStore = defineStore('internet', () => {
     }
   }
 
+  // DNS actions
+  async function loadDns() {
+    loading.value = true
+    error.value = null
+    try {
+      const resp = await fetch('/api/internet/dns')
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json()
+      dns.value = data
+    } catch (err: any) {
+      error.value = String(err?.message ?? err)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function loadDnsHistory(
+    range: '5m' | '1h' | '6h' | '24h' | '7d' | '30d' = '1h',
+    step = 60
+  ) {
+    loading.value = true
+    error.value = null
+    try {
+      const resp = await fetch(`/api/internet/dns/history?range=${range}&step=${step}`)
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json()
+      dnsHistory.value = data
+    } catch (err: any) {
+      error.value = String(err?.message ?? err)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function loadDnsCompare(hostname: string, recordType = 'A') {
+    loading.value = true
+    error.value = null
+    try {
+      const resp = await fetch(`/api/internet/dns/compare?hostname=${encodeURIComponent(hostname)}&record_type=${encodeURIComponent(recordType)}`)
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json()
+      dnsCompare.value = data
+    } catch (err: any) {
+      error.value = String(err?.message ?? err)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  // Route actions
+  async function loadRoutes() {
+    loading.value = true
+    error.value = null
+    try {
+      const resp = await fetch('/api/internet/routes')
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json()
+      routes.value = data
+    } catch (err: any) {
+      error.value = String(err?.message ?? err)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function loadTraceroute(target: string, maxHops = 30, protocol = 'icmp') {
+    loading.value = true
+    error.value = null
+    try {
+      const resp = await fetch(`/api/internet/routes/traceroute?target=${encodeURIComponent(target)}&max_hops=${maxHops}&protocol=${encodeURIComponent(protocol)}`)
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json()
+      traceroute.value = data
+    } catch (err: any) {
+      error.value = String(err?.message ?? err)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function loadRoutesHistory(range: '5m' | '1h' | '6h' | '24h' | '7d' | '30d' = '1h') {
+    loading.value = true
+    error.value = null
+    try {
+      const resp = await fetch(`/api/internet/routes/history?range=${range}`)
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json()
+      routesHistory.value = data
+    } catch (err: any) {
+      error.value = String(err?.message ?? err)
+    } finally {
+      loading.value = false
+    }
+  }
+
   async function loadAll() {
     await Promise.all([loadOverview(), loadQuality(), loadInterfaces()])
   }
@@ -375,6 +618,12 @@ export const useInternetStore = defineStore('internet', () => {
     interfaceHistory,
     qualityStatus,
     tcpStats,
+    dns,
+    dnsHistory,
+    dnsCompare,
+    routes,
+    traceroute,
+    routesHistory,
     loading,
     error,
     isConnected,
@@ -391,6 +640,12 @@ export const useInternetStore = defineStore('internet', () => {
     loadQualityStatus,
     loadTcpStats,
     loadInterfaceHistory,
+    loadDns,
+    loadDnsHistory,
+    loadDnsCompare,
+    loadRoutes,
+    loadTraceroute,
+    loadRoutesHistory,
     loadAll,
   }
 })

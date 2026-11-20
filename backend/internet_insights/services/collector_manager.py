@@ -9,10 +9,13 @@ from ..config import get_config
 from ..collectors.quality import QualityCollector
 from ..collectors.interface import InterfaceCollector
 from ..collectors.tcp_stats import TcpStatsCollector
+from ..collectors.dns import DnsCollector
+from ..collectors.route import RouteCollector
 from ..storage.repositories import (
     QualitySampleRepository,
     InterfaceSampleRepository,
     TcpStatsRepository,
+    DnsProbeRepository,
 )
 
 logger = logging.getLogger("dashboard.internet_insights.services.collector_manager")
@@ -33,6 +36,7 @@ class CollectorManager:
             "quality": QualitySampleRepository(),
             "interface": InterfaceSampleRepository(),
             "tcp_stats": TcpStatsRepository(),
+            "dns_probe": DnsProbeRepository(),
         }
 
     def _init_collectors(self) -> None:
@@ -41,6 +45,8 @@ class CollectorManager:
             "quality": QualityCollector(repository=self._repositories["quality"]),
             "interface": InterfaceCollector(repository=self._repositories["interface"]),
             "tcp_stats": TcpStatsCollector(repository=self._repositories["tcp_stats"]),
+            "dns": DnsCollector(repository=self._repositories["dns_probe"]),
+            "route": RouteCollector(),
         }
 
     def initialize(self) -> None:

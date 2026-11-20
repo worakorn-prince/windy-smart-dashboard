@@ -11,7 +11,7 @@ import pytest
 from internet_insights.collectors.quality import QualityCollector
 from internet_insights.collectors.interface import InterfaceCollector
 from internet_insights.services.collector_manager import CollectorManager
-from internet_insights.storage.repositories import QualitySampleRepository, InterfaceSampleRepository, TcpStatsRepository
+from internet_insights.storage.repositories import QualitySampleRepository, InterfaceSampleRepository, TcpStatsRepository, DnsProbeRepository
 from internet_insights.storage.database import InternetInsightsDB
 
 
@@ -31,6 +31,11 @@ def quality_repo(temp_db: InternetInsightsDB) -> QualitySampleRepository:
 @pytest.fixture
 def interface_repo(temp_db: InternetInsightsDB) -> InterfaceSampleRepository:
     return InterfaceSampleRepository(temp_db)
+
+
+@pytest.fixture
+def dns_probe_repo(temp_db: InternetInsightsDB) -> DnsProbeRepository:
+    return DnsProbeRepository(temp_db)
 
 
 class TestQualityCollectorLifecycle:
@@ -216,6 +221,7 @@ class TestCollectorManager:
                         "quality": quality_repo,
                         "interface": interface_repo,
                         "tcp_stats": TcpStatsRepository(temp_db),
+                        "dns_probe": DnsProbeRepository(temp_db),
                     }
                     manager._init_collectors()
 
@@ -237,6 +243,7 @@ class TestCollectorManager:
             "quality": quality_repo,
             "interface": interface_repo,
             "tcp_stats": TcpStatsRepository(temp_db),
+            "dns_probe": DnsProbeRepository(temp_db),
         }
         manager._init_collectors()
 
@@ -255,6 +262,7 @@ class TestCollectorManager:
             "quality": quality_repo,
             "interface": interface_repo,
             "tcp_stats": TcpStatsRepository(temp_db),
+            "dns_probe": DnsProbeRepository(temp_db),
         }
         manager._init_collectors()
 
@@ -269,17 +277,21 @@ class TestCollectorManager:
     def test_get_repository(self, temp_db: InternetInsightsDB):
         quality_repo = QualitySampleRepository(temp_db)
         interface_repo = InterfaceSampleRepository(temp_db)
+        dns_probe_repo = DnsProbeRepository(temp_db)
 
         manager = CollectorManager()
         manager._repositories = {
             "quality": quality_repo,
             "interface": interface_repo,
+            "dns_probe": dns_probe_repo,
         }
 
         qr = manager.get_repository("quality")
         ir = manager.get_repository("interface")
+        dr = manager.get_repository("dns_probe")
         none = manager.get_repository("nonexistent")
 
         assert qr is quality_repo
         assert ir is interface_repo
+        assert dr is dns_probe_repo
         assert none is None
