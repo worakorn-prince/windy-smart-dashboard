@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.3] - 2026-11-20
+
+### Added
+
+- **Insights page (`/insights`)** summarizing what the dashboard has recorded, fed by
+  `backend/.cache/history.db`: uPlot trend charts with baseline bands (the axis reports the
+  *effective window* actually covered — `samples` retention is ~10 h, so a 30 d request never
+  pretends to be full), per-mount disk growth (C:/D:/F:), top processes by average CPU,
+  maintenance summary (success rate shows `—` when there is no data), security summary by kind
+  plus top source IPs, and the list of ongoing anomalies. New `GET /api/insights?range=24h|7d|30d`
+  aggregates all five history tables in SQL, served through the single-flight snapshot cache and
+  pre-warmed at startup.
+- **Baseline & anomaly detection** (`backend/insights.py`): per-metric hourly profiles
+  (mean ± 3·std per hour of day, flat fallback when history is short) with a std floor so flat
+  metrics cannot produce infinite z-scores; a value is anomalous when |z| ≥ 3 for 3 consecutive
+  samples and only runs still active at the latest sample are reported. Exposed at
+  `GET /api/anomalies?range=24h|7d|30d`.
+
+### Documentation
+
+- `docs/API.md` synced with the real API: version reference 0.5.1 → current, the WebSocket
+  section now documents the fast greeting order (`processes` → `system` → full `metrics`
+  snapshot before broadcast) and the single-flight snapshot cache, 12 previously undocumented
+  endpoints added plus a Viewer section for the four `backend/viewer_api.py` endpoints, and the
+  `security/export` format list corrected to `json|html|pdf`.
+
+### Changed
+
+- `APP_VERSION`, the maintenance `MODULE_VERSION`, `frontend/package.json` and
+  `frontend/package-lock.json` bumped to `0.6.3`.
+- The new Insights E2E smoke test waits up to 30 s for its first chart: cold analytics compute
+  under load legitimately exceeds the default 10 s assertion window (idle compute is ~1.3 s).
+
 ## [0.6.2] - 2026-11-19
 
 ### Fixed

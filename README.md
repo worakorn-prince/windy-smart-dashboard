@@ -25,6 +25,11 @@ Built with FastAPI (Python 3.12) + Vue 3 / TypeScript / Vite.
 > packaging (`scripts/package_portable.py`), an OpenAPI docs + `/api/version`
 > endpoint, and a Playwright E2E smoke suite.
 
+> ✨ **What's new in v0.6.3** — a new **Insights** page (`/insights`) that turns the dashboard's
+> own history database into answers: trend charts with per-hour baseline bands, disk growth per
+> mount, top processes by average CPU, maintenance and security summaries, and ongoing anomaly
+> detection (|z| ≥ 3 sustained) — plus `docs/API.md` brought back in sync with the real API.
+
 > ✨ **What's new in v0.6.2** — the Processes card is trustworthy: no more
 > `System Idle Process` at 400–700% CPU with 0 GB RAM (PID 0 is filtered and
 > per-process CPU% is normalized per core, so rows read 0–100%), first
