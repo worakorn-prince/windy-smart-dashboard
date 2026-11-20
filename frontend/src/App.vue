@@ -62,6 +62,7 @@ store.connect()
         <RouterLink to="/internet-insights" exact-active-class="is-active" data-testid="side-nav-internet-insights">Internet Insights</RouterLink>
         <RouterLink to="/internet-dns" exact-active-class="is-active" data-testid="side-nav-internet-dns">DNS Insights</RouterLink>
         <RouterLink to="/internet-routing" exact-active-class="is-active" data-testid="side-nav-internet-routing">Routing Insights</RouterLink>
+        <RouterLink to="/internet-diagnostics" exact-active-class="is-active" data-testid="side-nav-internet-diagnostics">Diagnostic Lab</RouterLink>
       </nav>
 
       <div class="device-card" data-testid="device-card">

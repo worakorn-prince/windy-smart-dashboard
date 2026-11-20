@@ -995,3 +995,361 @@ async def get_routes_history(
     except Exception as e:
         logger.exception("Route history endpoint failed")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# ---------------------------------------------------------------------------
+# Developer Diagnostic Lab (INET-M4) — on-demand diagnostics + bounded sessions.
+# Appended section: existing endpoints above must not be modified.
+# ---------------------------------------------------------------------------
+
+from fastapi import Response  # noqa: E402  (append-only section)
+from pydantic import BaseModel, Field  # noqa: E402  (append-only section)
+
+_session_manager = None
+
+
+def _get_session_manager():
+    global _session_manager
+    if _session_manager is None:
+        from .services.session_manager import get_session_manager
+        _session_manager = get_session_manager()
+    return _session_manager
+
+
+def _require_session(manager, session_id: str) -> dict:
+    """Return the session dict or raise a 404 when missing (kept out of try blocks)."""
+    session = manager.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    return session
+
+
+class PingDiagRequest(BaseModel):
+    target: str
+    count: int = Field(default=4, ge=1, le=10)
+    interval_ms: int = Field(default=200, ge=0, le=5000)
+    timeout_ms: int = Field(default=2000, ge=100, le=10000)
+
+
+class DnsDiagRequest(BaseModel):
+    hostname: str
+    record_type: Literal["A", "AAAA"] = "A"
+
+
+class TcpDiagRequest(BaseModel):
+    target: str
+    port: int = Field(default=443, ge=1, le=65535)
+    timeout_ms: int = Field(default=3000, ge=100, le=10000)
+
+
+class TlsDiagRequest(BaseModel):
+    target: str
+    port: int = Field(default=443, ge=1, le=65535)
+    timeout_ms: int = Field(default=5000, ge=100, le=10000)
+    server_name: str | None = None
+
+
+class HttpDiagRequest(BaseModel):
+    url: str
+    method: str = "GET"
+    timeout_ms: int = Field(default=10000, ge=100, le=30000)
+    follow_redirects: bool = True
+    max_redirects: int = Field(default=5, ge=0, le=10)
+
+
+class MtuDiagRequest(BaseModel):
+    target: str
+    timeout_ms: int = Field(default=3000, ge=100, le=10000)
+    max_size: int = Field(default=1500, ge=68, le=1500)
+    min_size: int = Field(default=576, ge=68, le=1500)
+
+
+class SessionStartRequest(BaseModel):
+    profile: Literal["quick", "standard", "deep"] = "standard"
+    include_speedtest: bool = False
+    custom_targets: list[str] | None = None
+
+
+def _percentile(sorted_values: list[float], pct: float) -> float | None:
+    if not sorted_values:
+        return None
+    k = (len(sorted_values) - 1) * (pct / 100.0)
+    lower = int(k)
+    upper = min(lower + 1, len(sorted_values) - 1)
+    fraction = k - lower
+    return sorted_values[lower] * (1 - fraction) + sorted_values[upper] * fraction
+
+
+@router.post("/diagnostics/ping")
+async def post_diagnostics_ping(request: PingDiagRequest) -> dict:
+    """On-demand ping probe with RTT aggregation (min/median/p95/max, loss, jitter)."""
+    try:
+        from .diagnostics import validate_target
+        target = validate_target(request.target)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Ping diagnostic validation failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    import itertools
+
+    try:
+        ping_adapter = _get_ping_adapter()
+        timeout_sec = request.timeout_ms / 1000
+        samples: list[float | None] = []
+        for index in range(request.count):
+            rtt = await ping_adapter.ping(target, timeout=timeout_sec)
+            samples.append(rtt)
+            if index < request.count - 1 and request.interval_ms > 0:
+                await asyncio.sleep(request.interval_ms / 1000)
+
+        successes = sorted(s for s in samples if s is not None)
+        sent = len(samples)
+        received = len(successes)
+        loss_pct = round((sent - received) / sent * 100, 1) if sent else 0.0
+        diffs = [abs(b - a) for a, b in itertools.pairwise(successes)]
+        jitter_ms = round(sum(diffs) / len(diffs), 1) if diffs else 0.0
+
+        return {
+            "target": target,
+            "count": request.count,
+            "sent": sent,
+            "received": received,
+            "loss_pct": loss_pct,
+            "rtt": {
+                "min": round(successes[0], 1) if successes else None,
+                "median": round(statistics.median(successes), 1) if successes else None,
+                "p95": round(_percentile(successes, 95), 1) if successes else None,
+                "max": round(successes[-1], 1) if successes else None,
+            },
+            "jitter_ms": jitter_ms,
+            "samples": [
+                {"probe_index": i, "rtt_ms": s, "status": "success" if s is not None else "timeout"}
+                for i, s in enumerate(samples)
+            ],
+            **_common_metadata(source="diagnostic"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Ping diagnostic endpoint failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/diagnostics/dns")
+async def post_diagnostics_dns(request: DnsDiagRequest) -> dict:
+    """Thin DNS resolution probe via the system resolver (getaddrinfo)."""
+    try:
+        from .diagnostics import validate_target
+        hostname = validate_target(request.hostname)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("DNS diagnostic validation failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    try:
+        import socket
+        family = socket.AF_INET if request.record_type == "A" else socket.AF_INET6
+        start = time.monotonic()
+        status = "success"
+        error_code: str | None = None
+        answer_count = 0
+        try:
+            infos = await asyncio.wait_for(
+                asyncio.to_thread(socket.getaddrinfo, hostname, None, family=family, type=socket.SOCK_STREAM),
+                timeout=5.0,
+            )
+            answer_count = len(infos)
+        except TimeoutError:
+            status = "timeout"
+            error_code = "TimeoutError"
+        except socket.gaierror as e:
+            status = "dns_failure"
+            error_code = type(e).__name__
+        duration_ms = round((time.monotonic() - start) * 1000, 1)
+
+        return {
+            "hostname": hostname,
+            "record_type": request.record_type,
+            "status": status,
+            "duration_ms": duration_ms,
+            "answer_count": answer_count,
+            "error_code": error_code,
+            **_common_metadata(source="diagnostic", status=status),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("DNS diagnostic endpoint failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/diagnostics/tcp")
+async def post_diagnostics_tcp(request: TcpDiagRequest) -> dict:
+    """On-demand TCP connect diagnostic."""
+    try:
+        from .diagnostics import tcp as diagnostics_tcp
+        return await diagnostics_tcp.tcp_connect(request.target, request.port, timeout_ms=request.timeout_ms)
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("TCP diagnostic endpoint failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/diagnostics/tls")
+async def post_diagnostics_tls(request: TlsDiagRequest) -> dict:
+    """On-demand TLS handshake diagnostic."""
+    try:
+        from .diagnostics import tls as diagnostics_tls
+        return await diagnostics_tls.tls_handshake(
+            request.target,
+            port=request.port,
+            timeout_ms=request.timeout_ms,
+            server_name=request.server_name,
+        )
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("TLS diagnostic endpoint failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/diagnostics/http")
+async def post_diagnostics_http(request: HttpDiagRequest) -> dict:
+    """On-demand HTTP diagnostic with SSRF guard."""
+    try:
+        from .diagnostics import http as diagnostics_http
+        return await diagnostics_http.http_diagnostic(
+            request.url,
+            method=request.method,
+            timeout_ms=request.timeout_ms,
+            follow_redirects=request.follow_redirects,
+            max_redirects=request.max_redirects,
+        )
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("HTTP diagnostic endpoint failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/diagnostics/mtu")
+async def post_diagnostics_mtu(request: MtuDiagRequest) -> dict:
+    """On-demand path MTU discovery."""
+    try:
+        from .diagnostics import mtu as diagnostics_mtu
+        return await diagnostics_mtu.mtu_discovery(
+            request.target,
+            timeout_ms=request.timeout_ms,
+            max_size=request.max_size,
+            min_size=request.min_size,
+        )
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("MTU diagnostic endpoint failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/sessions", status_code=202)
+async def post_sessions(request: SessionStartRequest) -> dict:
+    """Start a bounded diagnostic session (202 Accepted)."""
+    try:
+        manager = _get_session_manager()
+        return await manager.start_session(
+            profile=request.profile,
+            include_speedtest=request.include_speedtest,
+            custom_targets=request.custom_targets,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        from .services.session_manager import SessionLimitError
+        if isinstance(e, SessionLimitError):
+            raise HTTPException(status_code=409, detail=str(e)) from e
+        if isinstance(e, (ValueError, TypeError)):
+            raise HTTPException(status_code=422, detail=str(e)) from e
+        logger.exception("Start diagnostic session failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/sessions/{session_id}")
+async def get_session_by_id(session_id: str) -> dict:
+    """Get a diagnostic session with its summary."""
+    session = _require_session(_get_session_manager(), session_id)
+    try:
+        return {**_common_metadata(source="service"), **session}
+    except Exception as e:
+        logger.exception("Get diagnostic session failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/sessions/{session_id}/results")
+async def get_session_results(session_id: str) -> dict:
+    """Get all result rows for a diagnostic session (payload parsed)."""
+    manager = _get_session_manager()
+    session = _require_session(manager, session_id)
+    try:
+        results = manager.get_results(session_id)
+        return {
+            "session_id": session_id,
+            "status": session.get("status"),
+            "results": results,
+            **_common_metadata(source="service"),
+        }
+    except Exception as e:
+        logger.exception("Get session results failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/sessions/{session_id}/cancel")
+async def post_session_cancel(session_id: str) -> dict:
+    """Cancel a running diagnostic session (stops at the next step boundary)."""
+    manager = _get_session_manager()
+    session = _require_session(manager, session_id)
+    status = session.get("status")
+    if status != "running":
+        raise HTTPException(status_code=409, detail=f"Session is not running (status: {status})")
+    try:
+        cancelled = await manager.cancel(session_id)
+    except Exception as e:
+        logger.exception("Cancel diagnostic session failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    if not cancelled:
+        raise HTTPException(status_code=409, detail="Session is no longer running")
+    return {"id": session_id, "status": "cancelling"}
+
+
+@router.get("/sessions/{session_id}/export")
+async def get_session_export(
+    session_id: str,
+    fmt: Literal["json", "csv", "md"] = Query(default="json", alias="format"),
+) -> Response:
+    """Export a diagnostic session as JSON, CSV or Markdown (redacted)."""
+    manager = _get_session_manager()
+    _require_session(manager, session_id)
+    try:
+        filename, media_type, content = manager.export_session(session_id, fmt)
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except Exception as e:
+        logger.exception("Export diagnostic session failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e

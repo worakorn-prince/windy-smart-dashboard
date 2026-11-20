@@ -360,6 +360,24 @@ export interface RoutesHistoryData {
   coverage: number
 }
 
+// Diagnostic Lab types
+export interface DiagnosticResult extends Record<string, unknown> {}
+export interface SessionData {
+  id: string
+  started_at: number | string
+  status: 'running' | 'cancelling' | 'completed' | 'failed' | 'cancelled'
+  profile: string
+  config?: Record<string, unknown>
+  summary?: Record<string, unknown> | null
+}
+export interface SessionResult {
+  id?: string
+  sequence: number
+  result_type: string
+  ts: string
+  payload: Record<string, unknown>
+}
+
 export const useInternetStore = defineStore('internet', () => {
   const overview = ref<OverviewData | null>(null)
   const quality = ref<QualityData | null>(null)
@@ -610,6 +628,116 @@ export const useInternetStore = defineStore('internet', () => {
     await Promise.all([loadOverview(), loadQuality(), loadInterfaces()])
   }
 
+  // Diagnostic Lab state
+  const diagnostic = ref<Record<string, unknown> | null>(null)
+  const session = ref<SessionData | null>(null)
+  const sessionResults = ref<SessionResult[]>([])
+
+  // Diagnostic Lab actions
+  async function runDiagnostic(tool: 'ping' | 'dns' | 'tcp' | 'tls' | 'http' | 'mtu', payload: Record<string, unknown>) {
+    loading.value = true
+    error.value = null
+    diagnostic.value = null
+    try {
+      const resp = await fetch(`/api/internet/diagnostics/${tool}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json()
+      diagnostic.value = data
+    } catch (err: any) {
+      error.value = String(err?.message ?? err)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function startSession(profile: string, includeSpeedtest: boolean, customTargets: string[]) {
+    loading.value = true
+    error.value = null
+    try {
+      const resp = await fetch('/api/internet/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          profile,
+          include_speedtest: includeSpeedtest,
+          custom_targets: customTargets,
+        }),
+      })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json()
+      session.value = data
+    } catch (err: any) {
+      error.value = String(err?.message ?? err)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function cancelSession(id: string) {
+    error.value = null
+    try {
+      const resp = await fetch(`/api/internet/sessions/${id}/cancel`, { method: 'POST' })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json()
+      // Cancel response is partial ({ id, status }) — merge status only when we already hold the session
+      if (session.value && session.value.id === id) {
+        session.value = { ...session.value, status: data.status }
+      } else {
+        session.value = data
+      }
+    } catch (err: any) {
+      error.value = String(err?.message ?? err)
+    }
+  }
+
+  async function loadSession(id: string) {
+    error.value = null
+    try {
+      const resp = await fetch(`/api/internet/sessions/${id}`)
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json()
+      session.value = data
+    } catch (err: any) {
+      error.value = String(err?.message ?? err)
+    }
+  }
+
+  async function loadSessionResults(id: string) {
+    error.value = null
+    try {
+      const resp = await fetch(`/api/internet/sessions/${id}/results`)
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json()
+      // Backend returns an envelope: { session_id, status, results: [...] }
+      sessionResults.value = Array.isArray(data) ? data : (data?.results ?? [])
+    } catch (err: any) {
+      error.value = String(err?.message ?? err)
+    }
+  }
+
+  async function exportSession(id: string, format: 'json' | 'csv' | 'md') {
+    error.value = null
+    try {
+      const resp = await fetch(`/api/internet/sessions/${id}/export?format=${encodeURIComponent(format)}`)
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const blob = await resp.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `session-${id}.${format}`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      error.value = String(err?.message ?? err)
+    }
+  }
+
   return {
     overview,
     quality,
@@ -647,5 +775,14 @@ export const useInternetStore = defineStore('internet', () => {
     loadTraceroute,
     loadRoutesHistory,
     loadAll,
+    diagnostic,
+    session,
+    sessionResults,
+    runDiagnostic,
+    startSession,
+    cancelSession,
+    loadSession,
+    loadSessionResults,
+    exportSession,
   }
 })

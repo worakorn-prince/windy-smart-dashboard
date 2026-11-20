@@ -11,6 +11,7 @@ import Insights from './pages/Insights.vue'
 import InternetInsights from '@/components/internet/InternetInsights.vue'
 import InternetDNS from './pages/InternetDNS.vue'
 import InternetRouting from './pages/InternetRouting.vue'
+import InternetDiagnostics from './pages/InternetDiagnostics.vue'
 import { autoTip } from './directives/autoTip'
 
 const router = createRouter({
@@ -23,6 +24,7 @@ const router = createRouter({
     { path: '/internet-insights', name: 'internet-insights', component: InternetInsights },
     { path: '/internet-dns', name: 'internet-dns', component: InternetDNS },
     { path: '/internet-routing', name: 'internet-routing', component: InternetRouting },
+    { path: '/internet-diagnostics', name: 'internet-diagnostics', component: InternetDiagnostics },
   ],
 })
 
