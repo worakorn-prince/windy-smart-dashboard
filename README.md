@@ -165,6 +165,24 @@ Open **http://127.0.0.1:8000** in your browser.
   readings (e.g. iGPU load, RAM temperature on boards without those
   diodes) show `N/A` instead of stale or misleading values
 
+### Internet Insights (`/api/internet`)
+- **Network telemetry** - quality (latency/jitter/packet loss), interface
+  counters, TCP stats, DNS probes (system resolver + direct UDP), route
+  table and traceroute, stored in a dedicated SQLite domain with
+  retention pruning
+- **Incidents & evidence** (M5) - anomaly rules with baselines create
+  incidents with typed evidence; lifecycle active -> acknowledged ->
+  resolved, 900 s re-open cooldown, auto-resolve on recovery, 90-day
+  retention (spec: docs/INTERNET_INSIGHTS.md section 15)
+- **Correlation** - gateway reachable + 2+ internet targets degraded +
+  DNS normal + TCP retransmits rising => one upstream-degradation incident
+- **REST** - GET /api/internet/incidents (filters status/category/since/limit),
+  GET /api/internet/incidents/{id} (incl. evidence), POST .../resolve
+- **Live WS** - /ws/internet (greeting + incident_created /
+  incident_updated, bounded queue 100, drop-oldest)
+- Note: the analyzer is not wired into a production scheduler yet
+  (planned M6) - incidents are produced only when the analyzer is
+  invoked (currently tests only)
 ### Security
 - **On-demand audit** — produces a risk-scored report with findings
 - **Live event stream** — WebSocket push of new ports, outbound
@@ -422,6 +440,10 @@ Open **http://localhost:5173** — Vite proxies `/api` and `/ws` to
 | GET    | `/api/reports/{name}`         | Download one generated report (admin)     |
 | WS     | `/ws/metrics`                 | Live metrics push (1 Hz)                  |
 | WS     | `/ws/security`                | Live security events push                 |
+| GET    | `/api/internet/incidents`     | Incident list (status/category/since/limit) |
+| GET    | `/api/internet/incidents/{id}` | Incident detail + evidence                |
+| POST   | `/api/internet/incidents/{id}/resolve` | Resolve an incident (no REST acknowledge) |
+| WS     | `/ws/internet`                | Live internet incidents push               |
 
 > 🔐 Endpoints marked **(admin)** call `require_admin`: when
 > `DASH_ADMIN_TOKEN` is set they require `X-Admin-Token: <token>`; when it is

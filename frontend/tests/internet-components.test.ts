@@ -1,3 +1,11 @@
+vi.mock('@/composables/useWebSocket', () => ({
+  useWebSocket: vi.fn(() => ({
+    isConnected: { value: false },
+    send: vi.fn(),
+    disconnect: vi.fn(),
+  })),
+}))
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'

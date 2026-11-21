@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { useWebSocket } from '@/composables/useWebSocket'
 
 export interface QualityTarget {
   target_id: string
@@ -378,6 +379,34 @@ export interface SessionResult {
   payload: Record<string, unknown>
 }
 
+export interface Incident {
+  id: string
+  started_at: number
+  ended_at: number | null
+  category: string
+  severity: string
+  status: string
+  title: string
+  summary: string | null
+  confidence: number
+  analyzer_version: string
+}
+
+export interface IncidentEvidence {
+  id: number
+  incident_id: string
+  evidence_type: string
+  observed_at: number
+  payload: Record<string, unknown>
+}
+
+export interface IncidentFilters {
+  status?: string
+  category?: string
+  since?: number
+  limit?: number
+}
+
 export const useInternetStore = defineStore('internet', () => {
   const overview = ref<OverviewData | null>(null)
   const quality = ref<QualityData | null>(null)
@@ -738,6 +767,129 @@ export const useInternetStore = defineStore('internet', () => {
     }
   }
 
+  // ---- Incidents / Intelligence (INET-M5 round 2) ----
+
+  const incidents = ref<Incident[]>([])
+  const incidentsLoading = ref(false)
+  const incidentsError = ref<string | null>(null)
+  const activeIncident = ref<Incident | null>(null)
+  const activeIncidentEvidence = ref<IncidentEvidence[]>([])
+  const activeIncidentLoading = ref(false)
+  const resolveConflictMessage = ref<string | null>(null)
+
+  function buildIncidentsQuery(filters?: IncidentFilters): string {
+    const params = new URLSearchParams()
+    if (filters?.status) params.set('status', filters.status)
+    if (filters?.category) params.set('category', filters.category)
+    if (typeof filters?.since === 'number') params.set('since', String(filters.since))
+    if (typeof filters?.limit === 'number') params.set('limit', String(filters.limit))
+    const qs = params.toString()
+    return qs ? `?${qs}` : ''
+  }
+
+  async function fetchIncidents(filters?: IncidentFilters) {
+    incidentsLoading.value = true
+    incidentsError.value = null
+    try {
+      const resp = await fetch(`/api/internet/incidents${buildIncidentsQuery(filters)}`)
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json()
+      const list = Array.isArray(data?.incidents) ? data.incidents : []
+      incidents.value = list
+      if (data?.status && data.status !== 'ok') {
+        const errors = Array.isArray(data?.errors) ? data.errors.join('; ') : ''
+        incidentsError.value = errors || `status: ${data.status}`
+      }
+      return list as Incident[]
+    } catch (err: any) {
+      incidentsError.value = String(err?.message ?? err)
+      return []
+    } finally {
+      incidentsLoading.value = false
+    }
+  }
+
+  async function fetchIncidentDetail(id: string) {
+    activeIncidentLoading.value = true
+    incidentsError.value = null
+    try {
+      const resp = await fetch(`/api/internet/incidents/${encodeURIComponent(id)}`)
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json()
+      const { evidence, ...incidentFields } = data ?? {}
+      activeIncident.value = incidentFields as Incident
+      activeIncidentEvidence.value = Array.isArray(evidence) ? evidence : []
+      return activeIncident.value
+    } catch (err: any) {
+      incidentsError.value = String(err?.message ?? err)
+      return null
+    } finally {
+      activeIncidentLoading.value = false
+    }
+  }
+
+  async function resolveIncident(id: string) {
+    resolveConflictMessage.value = null
+    const snapshot = incidents.value
+    const activeSnapshot = activeIncident.value
+    try {
+      const resp = await fetch(`/api/internet/incidents/${encodeURIComponent(id)}/resolve`, { method: 'POST' })
+      if (!resp.ok) {
+        let detail = `HTTP ${resp.status}`
+        try {
+          const body = await resp.json()
+          if (body?.detail) detail = String(body.detail)
+        } catch {
+          // body without JSON payload — keep HTTP status message
+        }
+        if (resp.status === 409) {
+          resolveConflictMessage.value = detail
+          await fetchIncidents()
+          if (activeIncident.value?.id === id || activeSnapshot?.id === id) {
+            await fetchIncidentDetail(id)
+          }
+        }
+        incidentsError.value = detail
+        return false
+      }
+      const data = await resp.json()
+      const { evidence: _evidence, ...incidentFields } = data ?? {}
+      const resolved = incidentFields as Incident
+      const idx = incidents.value.findIndex(i => i.id === id)
+      if (idx !== -1) incidents.value.splice(idx, 1, resolved)
+      if (activeIncident.value?.id === id) activeIncident.value = resolved
+      return true
+    } catch (err: any) {
+      incidents.value = snapshot
+      activeIncident.value = activeSnapshot
+      incidentsError.value = String(err?.message ?? err)
+      return false
+    }
+  }
+
+  async function refreshIncidents() {
+    await fetchIncidents()
+    if (activeIncident.value) {
+      await fetchIncidentDetail(activeIncident.value.id)
+    }
+  }
+
+  function handleIncidentsMessage(data: any) {
+    if (data?.type === 'incident_created' || data?.type === 'incident_updated') {
+      void refreshIncidents()
+    }
+  }
+
+  let ws: ReturnType<typeof useWebSocket> | null = null
+
+  function connectIncidents() {
+    if (ws) return
+    if (typeof WebSocket === 'undefined') return
+    ws = useWebSocket('/ws/internet', {
+      onMessage: handleIncidentsMessage,
+    })
+  }
+
   return {
     overview,
     quality,
@@ -784,5 +936,17 @@ export const useInternetStore = defineStore('internet', () => {
     loadSession,
     loadSessionResults,
     exportSession,
+    incidents,
+    incidentsLoading,
+    incidentsError,
+    activeIncident,
+    activeIncidentEvidence,
+    activeIncidentLoading,
+    resolveConflictMessage,
+    fetchIncidents,
+    fetchIncidentDetail,
+    resolveIncident,
+    refreshIncidents,
+    connectIncidents,
   }
 })

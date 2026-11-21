@@ -1177,6 +1177,14 @@ class IncidentEvidenceRepository:
             for r in rows
         ]
 
+    def prune(self, cutoff_ts: float) -> int:
+        cursor = self.db.execute(
+            "DELETE FROM internet_incident_evidence WHERE observed_at < ?",
+            (cutoff_ts,),
+        )
+        self.db.commit()
+        return cursor.rowcount
+
 
 def generate_session_id() -> str:
     """Generate a unique session ID."""

@@ -47,7 +47,7 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import psutil
 import uvicorn
@@ -1141,6 +1141,38 @@ async def ws_security(ws: WebSocket) -> None:
         pass
     finally:
         manager.security.discard(ws)
+
+
+if TYPE_CHECKING:
+    from internet_insights.services.ws_hub import InternetWSHub
+
+
+def _get_internet_ws_hub() -> InternetWSHub:
+    """Return the shared Internet Insights WS hub (bounded queues)."""
+    from internet_insights.services.ws_hub import get_internet_ws_hub
+
+    return get_internet_ws_hub()
+
+
+@app.websocket("/ws/internet")
+async def ws_internet(ws: WebSocket) -> None:
+    await ws.accept()
+    hub = _get_internet_ws_hub()
+    # Greeting goes on the wire BEFORE the client is registered, so no
+    # broadcast can ever slip in ahead of it (hello is always first).
+    try:
+        await ws.send_json({"type": "internet_status", "ts": time.time(), "state": "connected"})
+    except (WebSocketDisconnect, RuntimeError):
+        return
+    queue = hub.connect(ws)
+    hub.start_sender(ws, queue)
+    try:
+        while True:
+            await ws.receive_text()
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        hub.disconnect(ws)
 
 app.include_router(maintenance_router)
 app.include_router(viewer_router)

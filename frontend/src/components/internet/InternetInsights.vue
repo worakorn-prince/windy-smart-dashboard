@@ -8,6 +8,7 @@ import LatencyChart from './LatencyChart.vue';
 import JitterChart from './JitterChart.vue';
 import PacketLossChart from './PacketLossChart.vue';
 import NetworkInterfacesList from './NetworkInterfacesList.vue';
+import IncidentTimeline from './IncidentTimeline.vue';
 
 const store = useInternetStore();
 
@@ -29,6 +30,7 @@ async function loadQualityHistory() {
 onMounted(() => {
   loadData();
   loadQualityHistory();
+  store.connectIncidents();
   // Refresh every 30 seconds
   const interval = setInterval(() => {
     loadData();
@@ -127,6 +129,10 @@ function setRange(r: '5m' | '1h' | '6h' | '24h' | '7d' | '30d') {
       <section class="interfaces-section" data-testid="interfaces-section">
         <h2>อินเทอร์เฟซเครือข่าย</h2>
         <NetworkInterfacesList />
+      </section>
+
+      <section class="incidents-section" data-testid="incidents-section">
+        <IncidentTimeline />
       </section>
     </div>
   </div>
@@ -297,5 +303,9 @@ function setRange(r: '5m' | '1h' | '6h' | '24h' | '7d' | '30d') {
   font-size: 18px;
   font-weight: 600;
   color: var(--text);
+}
+
+.incidents-section {
+  grid-column: 1 / -1;
 }
 </style>

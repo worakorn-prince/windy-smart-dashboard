@@ -1353,3 +1353,131 @@ async def get_session_export(
     except Exception as e:
         logger.exception("Export diagnostic session failed")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# ---- Incidents (INET-M5) ----
+
+_incident_manager = None
+
+
+def _get_incident_manager():
+    global _incident_manager
+    if _incident_manager is None:
+        from .services.incident_manager import IncidentManager
+
+        _incident_manager = IncidentManager()
+    return _incident_manager
+
+
+def _get_incident_ws_hub():
+    """Return the shared hub so events reach /ws/internet clients."""
+    from .services.ws_hub import get_internet_ws_hub
+
+    return get_internet_ws_hub()
+
+
+def _incident_to_dict(incident) -> dict:
+    return {
+        "id": incident.id,
+        "started_at": incident.started_at,
+        "ended_at": incident.ended_at,
+        "category": incident.category,
+        "severity": incident.severity,
+        "status": incident.status,
+        "title": incident.title,
+        "summary": incident.summary,
+        "confidence": incident.confidence,
+        "analyzer_version": incident.analyzer_version,
+    }
+
+
+def _require_incident(manager, incident_id: str):
+    incident = manager.get(incident_id)
+    if incident is None:
+        raise HTTPException(status_code=404, detail=f"Incident not found: {incident_id}")
+    return incident
+
+
+@router.get("/incidents")
+async def get_incidents(
+    status: str | None = Query(default=None),
+    category: str | None = Query(default=None),
+    since: float | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict:
+    """List incidents with optional status/category/since filters."""
+    manager = _get_incident_manager()
+    try:
+        incidents = manager.list_incidents(status=status, category=category, since=since, limit=limit)
+        return {
+            **_common_metadata(source="service"),
+            "incidents": [_incident_to_dict(i) for i in incidents],
+            "count": len(incidents),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        first = str(e) or e.__class__.__name__
+        raise HTTPException(status_code=422, detail=f"Invalid filter: {first}") from e
+
+
+@router.get("/incidents/{incident_id}")
+async def get_incident(incident_id: str) -> dict:
+    """Get one incident with its evidence (payload parsed)."""
+    manager = _get_incident_manager()
+    incident = _require_incident(manager, incident_id)
+    try:
+        evidence = manager.evidence_for(incident_id)
+        evidence_items = []
+        for ev in evidence:
+            try:
+                payload = json.loads(ev.payload_json)
+            except (TypeError, ValueError):
+                payload = {"raw": ev.payload_json}
+            evidence_items.append(
+                {
+                    "id": ev.id,
+                    "incident_id": ev.incident_id,
+                    "evidence_type": ev.evidence_type,
+                    "observed_at": ev.observed_at,
+                    "payload": payload,
+                }
+            )
+        return {
+            **_common_metadata(source="service"),
+            **_incident_to_dict(incident),
+            "evidence": evidence_items,
+        }
+    except Exception as e:
+        logger.exception("Get incident failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/incidents/{incident_id}/resolve")
+async def post_incident_resolve(incident_id: str) -> dict:
+    """Resolve an incident (active/acknowledged -> resolved).
+
+    409 when the incident is already resolved/suppressed.
+    """
+    from .services.incident_manager import InvalidIncidentTransitionError
+
+    manager = _get_incident_manager()
+    _require_incident(manager, incident_id)
+    try:
+        incident = manager.resolve_incident(incident_id)
+    except InvalidIncidentTransitionError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Resolve incident failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    hub = _get_incident_ws_hub()
+    try:
+        hub.emit("incident_updated", incident=_incident_to_dict(incident))
+    except Exception:
+        logger.debug("incident_updated broadcast failed (no running loop?)", exc_info=True)
+    return {
+        **_common_metadata(source="service"),
+        **_incident_to_dict(incident),
+    }
