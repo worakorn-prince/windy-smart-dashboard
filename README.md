@@ -25,6 +25,14 @@ Built with FastAPI (Python 3.12) + Vue 3 / TypeScript / Vite.
 > packaging (`scripts/package_portable.py`), an OpenAPI docs + `/api/version`
 > endpoint, and a Playwright E2E smoke suite.
 
+> ✨ **What's new in v0.7.0** — **Internet Insights**: full internet-connectivity observability
+> built into the dashboard — an Overview with connection status, quality targets, throughput and
+> recent incidents; Performance charts for latency/jitter/loss with baseline bands; a Routing
+> page with the routing table and traceroute; DNS resolver health with history and comparison;
+> and Diagnostics troubleshooting sessions with live results, cancellation and export. Shipped
+> with a 10-scenario Playwright E2E suite (fully mocked) and incident detection wired to the
+> dashboard alert engine.
+
 > ✨ **What's new in v0.6.3** — a new **Insights** page (`/insights`) that turns the dashboard's
 > own history database into answers: trend charts with per-hour baseline bands, disk growth per
 > mount, top processes by average CPU, maintenance and security summaries, and ongoing anomaly

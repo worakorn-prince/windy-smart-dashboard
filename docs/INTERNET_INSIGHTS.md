@@ -1,7 +1,7 @@
 Technical Specification & Implementation Plan
 
 Version: 1.0
-Target baseline: Windy Smart Dashboard v0.6.3+
+Target baseline: Windy Smart Dashboard v0.7.0+
 Feature: Internet Insights
 Product level: Advanced Power User / Developer
 Collection strategy: Hybrid

@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-11-21
+
+### Added
+
+- **Internet Insights v1** (Issue #12): full observability feature for internet connectivity —
+  Overview (connection status, quality targets, throughput, active interface, recent incidents,
+  DNS health), Performance (per-target latency/jitter/loss charts with baseline bands and range
+  selector), Routing (routing table, default gateway, traceroute), DNS (resolver health cards,
+  history charts, resolver comparison), and Diagnostics (troubleshooting sessions with live
+  results, cancellation, and JSON/HTML export). Backend pipeline, analyzer, incident engine,
+  REST/WS API and insights UI shipped across M1-M6 (`1eac1e1`, `b165bd4`, `77f898e`).
+- **E2E coverage**: `frontend/e2e/internet-insights.spec.ts` — 10 scenarios covering the full
+  spec checklist (overview, quality targets, range selector, DNS cards, DNS compare modal,
+  traceroute, session start/cancel/report/export, and existing pages staying functional), all
+  against mocked endpoints so CI needs no external internet.
+
+### Documentation
+
+- `docs/INTERNET_INSIGHTS.md` (spec + progress) and `docs/INTERNET_INSIGHTS_API.md` (endpoint
+  contracts with envelope shapes) shipped with the feature.
+
+### Changed
+
+- `APP_VERSION`, the maintenance `MODULE_VERSION`, `frontend/package.json`,
+  `frontend/package-lock.json` bumped to `0.7.0`.
+
 ## [0.6.3] - 2026-11-20
 
 ### Added
