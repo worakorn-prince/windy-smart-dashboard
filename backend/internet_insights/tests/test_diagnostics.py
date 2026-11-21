@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import socket
 import time
 from datetime import UTC, datetime
 
+import httpcore
 import httpx
 import pytest
 
@@ -15,6 +17,7 @@ from internet_insights.diagnostics import mtu as mtu_diag
 from internet_insights.diagnostics import tcp as tcp_diag
 from internet_insights.diagnostics import tls as tls_diag
 from internet_insights.diagnostics.http import SsrfBlockedError, redact_url
+from internet_insights.diagnostics.http import _PinnedIpNetworkBackend
 
 
 class TestValidateTarget:
@@ -144,10 +147,9 @@ def _resolver_for(ip: str):
 class TestHttpDiagnostic:
     @staticmethod
     def _handler_response(status_code: int, headers: dict[str, str] | None = None) -> httpx.Response:
-        async def _body():
-            yield b""
-
-        return httpx.Response(status_code, headers=headers, content=_body())
+        # Plain bytes: async-generator content is incompatible with httpx
+        # MockTransport under stream=True (httpx 0.28 raises TypeError).
+        return httpx.Response(status_code, headers=headers, content=b"")
 
     @pytest.mark.asyncio
     async def test_success_with_mock_transport(self, monkeypatch):
@@ -191,6 +193,133 @@ class TestHttpDiagnostic:
             await http_diag.http_diagnostic("http://user:pass@example.com/")
         assert redact_url("https://user:pass@example.com/path") == "https://REDACTED@example.com/path"
         assert redact_url("https://example.com/path") == "https://example.com/path"
+
+    @pytest.mark.asyncio
+    async def test_body_truncated_at_size_cap(self, monkeypatch):
+        monkeypatch.setattr(http_diag.socket, "getaddrinfo", _resolver_for("93.184.216.34"))
+        monkeypatch.setattr(http_diag, "MAX_RESPONSE_BODY_BYTES", 16)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=bytes(range(64)))
+
+        result = await http_diag.http_diagnostic("http://example.com/big", transport=httpx.MockTransport(handler))
+        assert result["status"] == "success"
+        assert result["status_code"] == 200
+        assert result["content_length"] == 16
+        assert result["body_truncated"] is True
+        assert result["ttfb_ms"] is not None
+        assert result["total_ms"] is not None
+
+
+class _RecordingBackend(httpcore.AsyncNetworkBackend):
+    """Delegate that records every dial target and fails the connection."""
+
+    def __init__(self, connect_error: Exception | None = None):
+        self.dial_targets: list[str] = []
+        self._connect_error = connect_error
+
+    async def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+        self.dial_targets.append(str(host))
+        if self._connect_error is not None:
+            raise self._connect_error
+        raise OSError(f"no route to {host}")
+
+
+class TestPinnedTransportSecurity:
+    """MAJOR-3: TOCTOU closure + validated-IP-only dialing + fail-closed guard."""
+
+    @pytest.mark.asyncio
+    async def test_rebinding_to_private_ip_blocked_at_connect_time(self, monkeypatch):
+        public_ip, private_ip = "93.184.216.34", "192.168.0.10"
+        calls = {"n": 0}
+
+        def _rebinding_resolver(host, port=None, family=0, type=0):
+            calls["n"] += 1
+            ip = public_ip if calls["n"] == 1 else private_ip
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))]
+
+        monkeypatch.setattr(http_diag.socket, "getaddrinfo", _rebinding_resolver)
+        delegate = _RecordingBackend()
+        backend = http_diag._PinnedIpNetworkBackend(delegate, allow_private=False)
+
+        await http_diag._resolve_and_guard("example.com", allow_private=False)
+
+        with pytest.raises(SsrfBlockedError):
+            await backend.connect_tcp("example.com", 80, timeout=5.0)
+
+        assert calls["n"] == 2
+        assert delegate.dial_targets == []
+
+    @pytest.mark.asyncio
+    async def test_delegate_receives_only_validated_ip(self, monkeypatch):
+        monkeypatch.setattr(http_diag.socket, "getaddrinfo", _resolver_for("93.184.216.34"))
+        delegate = _RecordingBackend()
+        backend = http_diag._PinnedIpNetworkBackend(delegate, allow_private=False)
+
+        with pytest.raises(OSError, match=r"no route to 93\.184\.216\.34"):
+            await backend.connect_tcp("example.com", 443, timeout=5.0)
+
+        assert delegate.dial_targets == ["93.184.216.34"]
+
+    @pytest.mark.asyncio
+    async def test_deadline_shared_across_candidates(self, monkeypatch):
+        ips = ["93.184.216.34", "93.184.216.35", "93.184.216.36"]
+
+        def _multi_resolver(host, port=None, family=0, type=0):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0)) for ip in ips]
+
+        monkeypatch.setattr(http_diag.socket, "getaddrinfo", _multi_resolver)
+
+        class _SlowBackend(httpcore.AsyncNetworkBackend):
+            def __init__(self):
+                self.timeouts: list[float | None] = []
+                self.dial_targets: list[str] = []
+
+            async def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+                self.dial_targets.append(str(host))
+                self.timeouts.append(timeout)
+                await asyncio.sleep(0.3)
+                raise OSError("refused")
+
+        slow = _SlowBackend()
+        backend = http_diag._PinnedIpNetworkBackend(slow, allow_private=False)
+
+        start = time.monotonic()
+        with pytest.raises(OSError):
+            await backend.connect_tcp("example.com", 80, timeout=1.0)
+        total = time.monotonic() - start
+
+        assert slow.dial_targets == ips
+        assert len(slow.timeouts) == 3
+        assert slow.timeouts[0] == pytest.approx(1.0, abs=0.05)
+        assert slow.timeouts[1] == pytest.approx(0.7, abs=0.05)
+        assert slow.timeouts[2] == pytest.approx(0.4, abs=0.05)
+        assert total < 1.6
+
+    def test_pinned_transport_embeds_pinned_backend_and_is_fail_closed(self, monkeypatch):
+        transport = http_diag._pinned_transport(allow_private=False)
+        pool = transport._pool
+        assert isinstance(pool._network_backend, _PinnedIpNetworkBackend)
+
+        class _PoolWithoutBackend:
+            _ssl_context = None
+            _max_connections = 1
+            _max_keepalive_connections = 1
+            _keepalive_expiry = 5.0
+            _http1 = True
+            _http2 = False
+            _uds = None
+            _local_address = None
+            _retries = 0
+            _socket_options = None
+
+        class _TransportWithoutBackend(httpx.AsyncHTTPTransport):
+            def __init__(self, *args, **kwargs):
+                self._pool = _PoolWithoutBackend()
+
+        monkeypatch.setattr(httpx, "AsyncHTTPTransport", _TransportWithoutBackend)
+        with pytest.raises(RuntimeError, match="fail-closed"):
+            http_diag._pinned_transport(allow_private=False)
 
 
 class TestMtuDiscovery:

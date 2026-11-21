@@ -14,11 +14,16 @@ MAX_MTU_SIZE = 1500
 
 async def _ping_size_probe(target: str, size: int, timeout_sec: float) -> str:
     """Run `ping -n 1 -f -l <size>` once; returns success|timeout|error (returncode 0 = success)."""
-    command = f"ping -n 1 -f -l {size} {target}"
     try:
         proc = await asyncio.wait_for(
-            asyncio.create_subprocess_shell(
-                command,
+            asyncio.create_subprocess_exec(
+                "ping",
+                "-n",
+                "1",
+                "-f",
+                "-l",
+                str(size),
+                target,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             ),

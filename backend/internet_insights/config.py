@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+
 
 @dataclass
 class InternetInsightsConfig:
@@ -58,8 +60,8 @@ class InternetInsightsConfig:
     min_baseline_samples: int = 100
     min_detection_samples: int = 20
 
-    # Database path
-    db_path: Path = field(default_factory=lambda: Path("backend/.cache/history.db"))
+    # Database path (anchored to backend/ regardless of cwd)
+    db_path: Path = field(default_factory=lambda: BASE_DIR / ".cache" / "history.db")
 
 
 def _parse_float_env(key: str, default: float) -> float:

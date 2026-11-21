@@ -741,6 +741,13 @@ Diagnostic results| 30 days
 Incidents| 90 days
 Incident evidence| 90 days
 
+Note: while an incident is still open, its rule skips re-evaluation
+(skipped_reason is set), so it is never auto-resolved by a later tick.
+Auto-resolve happens only when the rule fully evaluated (skipped_reason is
+None) and the condition no longer holds. This is design intent: an open
+incident reflects the operator-visible state until recovery is actually
+observed, not a bug.
+
 Make retention configurable.
 
 Aggregate before pruning where long-term history is required.

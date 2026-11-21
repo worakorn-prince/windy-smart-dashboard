@@ -316,13 +316,14 @@ async def lifespan(app: FastAPI):
     history_task = asyncio.create_task(_history_loop())
     report_task = asyncio.create_task(_report_loop())
     audit_task = asyncio.create_task(scheduled_audit.audit_loop())
+    incident_task = asyncio.create_task(_incident_loop())
     try:
         yield
     finally:
         if sec_mon:
             await sec_mon.stop()
         for t in (metrics_task, process_task, uptime_task, history_task, report_task, audit_task,
-                  insights_prewarm_task):
+                  insights_prewarm_task, incident_task):
             t.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await t
@@ -398,6 +399,44 @@ async def _metrics_loop() -> None:
         except Exception:
             logger.exception("metrics loop error")
         await asyncio.sleep(METRICS_INTERVAL)
+
+
+async def _incident_loop() -> None:
+    """Evaluate internet-insight rules and drive the incident lifecycle.
+
+    Mirrors the metrics-loop pattern: recover from every error, keep the
+    ticker independent of the WS hub, prune retention periodically.
+    """
+    from internet_insights.analyzers.rules import IncidentAnalyzer
+    from internet_insights.router import _incident_to_dict
+    from internet_insights.services.incident_manager import IncidentManager
+
+    analyzer = IncidentAnalyzer()
+    manager = IncidentManager()
+    hub = _get_internet_ws_hub()
+    last_prune = 0.0
+    while True:
+        try:
+            evaluations = await asyncio.to_thread(analyzer.evaluate_all)
+            correlated = analyzer.correlate(evaluations)
+            for ev in [*evaluations, *(correlated,)] if correlated else evaluations:
+                outcome = await asyncio.to_thread(manager.process_evaluation, ev)
+                incident = outcome.incident
+                if incident is None or outcome.action in ("none", "skipped_cooldown"):
+                    continue
+                msg_type = "incident_created" if outcome.action == "created" else "incident_updated"
+                try:
+                    hub.emit(msg_type, incident=_incident_to_dict(incident))
+                except RuntimeError:
+                    logger.debug("incident %s broadcast failed (no running loop?)", incident.id, exc_info=True)
+            if time.time() - last_prune >= 3600.0:
+                last_prune = time.time()
+                await asyncio.to_thread(manager.prune_retention)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("incident loop error")
+        await asyncio.sleep(60.0)
 
 
 async def _process_loop() -> None:
@@ -1176,7 +1215,10 @@ async def ws_internet(ws: WebSocket) -> None:
 
 app.include_router(maintenance_router)
 app.include_router(viewer_router)
-app.include_router(internet_insights_router)
+try:
+    app.include_router(internet_insights_router)
+except Exception:
+    logger.exception("internet_insights router not registered (module isolation)")
 
 # ---- Serving frontend (production) ---- #
 

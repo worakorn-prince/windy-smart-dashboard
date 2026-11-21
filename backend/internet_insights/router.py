@@ -28,9 +28,6 @@ def _validate_range(range: str) -> int:
     return RANGE_SECONDS[range]
 
 
-router = APIRouter(prefix="/api/internet", tags=["Internet Insights"])
-
-
 # Lazy initialization helpers
 _metrics_adapter = None
 _ping_adapter = None

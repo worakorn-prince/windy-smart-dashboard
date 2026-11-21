@@ -7,8 +7,10 @@ import ipaddress
 import re
 import socket
 import time
+from typing import Any
 from urllib.parse import urlsplit
 
+import httpcore
 import httpx
 
 from . import HTTP_TIMEOUT_CAP_MS, is_blocked_ip, validate_timeout_ms
@@ -17,6 +19,7 @@ SAFE_METHODS = ("GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS", "PATCH")
 REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 USERINFO_RE = re.compile(r"^(?P<scheme>https?://)(?P<userinfo>[^/@\s:]+:[^/@\s]+@)(?P<rest>.*)", re.IGNORECASE)
 MAX_PAYLOAD_URL_LENGTH = 2048
+MAX_RESPONSE_BODY_BYTES = 2 * 1024 * 1024
 
 
 class SsrfBlockedError(ValueError):
@@ -74,6 +77,98 @@ async def _resolve_and_guard(hostname: str, allow_private: bool) -> float:
     return duration_ms
 
 
+class _PinnedIpNetworkBackend(httpcore.AsyncNetworkBackend):
+    """Connect only to IPs that pass the SSRF guard (TOCTOU closure).
+
+    Every dial re-resolves and re-validates all IPs before connecting to
+    the exact validated address; SNI/Host keep the original hostname.
+    """
+
+    def __init__(self, delegate: httpcore.AsyncNetworkBackend, allow_private: bool):
+        self._delegate = delegate
+        self._allow_private = allow_private
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Any = None,
+    ) -> Any:
+        infos = await asyncio.to_thread(
+            socket.getaddrinfo,
+            host,
+            None,
+            family=socket.AF_UNSPEC,
+            type=socket.SOCK_STREAM,
+        )
+        seen: list[str] = []
+        for info in infos:
+            addr = info[4][0]
+            if addr not in seen:
+                seen.append(addr)
+        candidates: list[str] = []
+        for addr in seen:
+            try:
+                ip = ipaddress.ip_address(addr)
+            except ValueError:
+                continue
+            if not self._allow_private and is_blocked_ip(ip):
+                raise SsrfBlockedError(f"Blocked URL host resolves to private/loopback/link-local address: {host} -> {addr}")
+            candidates.append(addr)
+        if not candidates:
+            raise ValueError(f"No usable addresses resolved for {host}")
+        last_exc: Exception | None = None
+        deadline = None if timeout is None else time.monotonic() + timeout
+        for addr in candidates:
+            dial_timeout = timeout
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    last_exc = last_exc if last_exc is not None else httpcore.ConnectTimeout(
+                        f"connect budget exhausted before trying {host} -> {addr}"
+                    )
+                    break
+                dial_timeout = remaining
+            try:
+                return await self._delegate.connect_tcp(
+                    addr,
+                    port,
+                    timeout=dial_timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except (OSError, httpcore.ConnectError, httpcore.ConnectTimeout) as e:
+                last_exc = e
+        raise last_exc if last_exc is not None else OSError(f"connect failed for {host}")
+
+
+def _pinned_transport(allow_private: bool) -> httpx.AsyncBaseTransport:
+    """httpx transport whose network layer dials only SSRF-validated IPs."""
+    transport = httpx.AsyncHTTPTransport(trust_env=False)
+    delegate = getattr(transport._pool, "_network_backend", None)
+    if delegate is None:
+        raise RuntimeError(
+            "httpcore internals changed: _network_backend not found on pool; "
+            "IP-pinned transport cannot be constructed (fail-closed, refusing unpinned dial)"
+        )
+    transport._pool = httpcore.AsyncConnectionPool(
+        ssl_context=transport._pool._ssl_context,
+        max_connections=transport._pool._max_connections,
+        max_keepalive_connections=transport._pool._max_keepalive_connections,
+        keepalive_expiry=transport._pool._keepalive_expiry,
+        http1=transport._pool._http1,
+        http2=transport._pool._http2,
+        uds=transport._pool._uds,
+        local_address=transport._pool._local_address,
+        retries=transport._pool._retries,
+        socket_options=transport._pool._socket_options,
+        network_backend=_PinnedIpNetworkBackend(delegate, allow_private),
+    )
+    return transport
+
+
 def _timing_collector(timings: dict[str, float | None]) -> object:
     events: dict[str, float] = {}
 
@@ -119,13 +214,15 @@ async def http_diagnostic(
     status = "success"
     error_code: str | None = None
     response: httpx.Response | None = None
+    body = b""
+    truncated = False
     total_start = time.monotonic()
 
     try:
         async with httpx.AsyncClient(
             follow_redirects=False,
             timeout=timeout_sec,
-            transport=transport,
+            transport=transport if transport is not None else _pinned_transport(allow_private),
             headers={"User-Agent": "windy-dashboard-diagnostics/1.0"},
             trust_env=False,
         ) as client:
@@ -133,9 +230,11 @@ async def http_diagnostic(
                 parts = urlsplit(current_url)
                 timings["dns_ms"] = await _resolve_and_guard(parts.hostname, allow_private)
                 request = client.build_request(current_method, current_url, extensions={"trace": trace_cb})
-                response = await client.send(request)
-                timings["ttfb_ms"] = round(response.elapsed.total_seconds() * 1000, 1)
+                send_start = time.monotonic()
+                response = await client.send(request, stream=True)
                 if response.is_redirect and follow_redirects:
+                    await response.aclose()
+                    timings["ttfb_ms"] = round((time.monotonic() - send_start) * 1000, 1)
                     location = response.headers.get("location", "")
                     redirect_chain.append({"url": redact_url(str(response.url))[:MAX_PAYLOAD_URL_LENGTH], "status_code": response.status_code})
                     if not location:
@@ -144,8 +243,20 @@ async def http_diagnostic(
                     current_url = _validate_http_url(next_url)
                     if response.status_code == 303:
                         current_method = "GET"
-                    await response.aclose()
                     continue
+                chunks: list[bytes] = []
+                received = 0
+                truncated = False
+                async for chunk in response.aiter_bytes():
+                    if received + len(chunk) > MAX_RESPONSE_BODY_BYTES:
+                        chunks.append(chunk[: MAX_RESPONSE_BODY_BYTES - received])
+                        truncated = True
+                        break
+                    chunks.append(chunk)
+                    received += len(chunk)
+                await response.aclose()
+                timings["ttfb_ms"] = round((time.monotonic() - send_start) * 1000, 1)
+                body = b"".join(chunks)
                 break
             else:
                 status = "error"
@@ -177,6 +288,7 @@ async def http_diagnostic(
     }
     if response is not None:
         payload["http_version"] = response.http_version
-        payload["content_length"] = len(response.content)
+        payload["content_length"] = len(body)
+        payload["body_truncated"] = truncated
         payload["server"] = response.headers.get("server")
     return payload
